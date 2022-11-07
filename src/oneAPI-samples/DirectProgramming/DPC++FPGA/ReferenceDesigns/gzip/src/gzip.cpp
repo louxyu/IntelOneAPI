@@ -19,7 +19,7 @@ using namespace sycl;
 
 // The minimum file size of a file to be compressed.
 // Any filesize less than this results in an error.
-constexpr int minimum_filesize = kVec + 1;
+constexpr int minimum_filesize = kVec + 1;//要压缩文件的最小大小
 
 bool help = false;
 
@@ -182,33 +182,44 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
+/**
+ * 内核信息
+ */
 struct KernelInfo {
-  buffer<struct GzipOutInfo, 1> *gzip_out_buf;
-  buffer<unsigned, 1> *current_crc;
-  buffer<char, 1> *pobuf;
-  buffer<char, 1> *pibuf;
-  char *pobuf_decompress;
+  buffer<struct GzipOutInfo, 1> *gzip_out_buf;//输出缓存数据
+  buffer<unsigned, 1> *current_crc;//crc校验数据
+  buffer<char, 1> *pobuf;//
+  buffer<char, 1> *pibuf;//
+  char *pobuf_decompress;//
 
-  uint32_t buffer_crc[kMinBufferSize];
-  uint32_t refcrc;
+  uint32_t buffer_crc[kMinBufferSize];//
+  uint32_t refcrc;//
 
-  const char *pref_buffer;
-  char *poutput_buffer;
-  size_t file_size;
-  struct GzipOutInfo out_info[kMinBufferSize];
-  int iteration;
-  bool last_block;
+  const char *pref_buffer;//
+  char *poutput_buffer;//
+  size_t file_size;//
+  struct GzipOutInfo out_info[kMinBufferSize];//
+  int iteration;//
+  bool last_block;//
 };
 
 // returns 0 on success, otherwise a non-zero failure code.
-int CompressFile(queue &q, std::string &input_file, std::vector<std::string> outfilenames,
-                 int iterations, bool report) {
-  size_t isz;
-  char *pinbuf;
+/**
+ *
+ * @param q  queue
+ * @param input_file 需要压缩的文件
+ * @param outfilenames 压缩文件存放路径
+ * @param iterations 迭代次数
+ * @param report 是否生成压缩文件及报告 true:输出;false:不输出
+ * @return
+ */
+int CompressFile(queue &q, std::string &input_file, std::vector<std::string> outfilenames,int iterations, bool report) {
+  size_t isz;//需要压缩文件的大小
+  char *pinbuf;//文件缓存 设备可访问主机分配时 可以快速访问DMA
 
   // Read the input file
-  std::string device_string =
-      q.get_device().get_info<info::device::name>().c_str();
+  //获取FPGA设备信息
+  std::string device_string =q.get_device().get_info<info::device::name>().c_str();
 
   // If
   // the device is S10, we pre-pin some buffers to
@@ -216,25 +227,33 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
   // achieve peak kernel throughput. Pre-pinning is
   // only supported on the PAC-S10-USM BSP. It's not
   // needed on PAC-A10 to achieve peak performance.
+  //判断是否是S10设备
   bool isS10 =  (device_string.find("s10") != std::string::npos);
+  //判断设备是否可以访问主机分配
   bool prepin = q.get_device().get_info<info::device::usm_host_allocations>();
 
+  //是S10设备 但不能访问主机分配时 发出警告
   if (isS10 && !prepin) {
+      //警告:此平台不支持主机分配，这意味着不支持预固定。DMA传输可能比预期的要慢，这可能会降低应用程序吞吐量
     std::cout << "Warning: Host allocations are not supported on this platform, which means that pre-pinning is not supported. DMA transfers may be slower than expected which may reduce application throughput.\n\n";
   }
 
   // padding for the input and output buffers to deal with granularity of
   // kernel reads and writes
-  constexpr size_t kInOutPadding = 16 * kVec;
+
+  //缓冲区大小256
+  constexpr size_t kInOutPadding = 16 * kVec;//缓冲区 值=256
   
-  std::ifstream file(input_file,
-                     std::ios::in | std::ios::binary | std::ios::ate);
+  std::ifstream file(input_file,std::ios::in | std::ios::binary | std::ios::ate);
   if (file.is_open()) {
-    isz = file.tellg();
+      //获取流指针
+    isz = file.tellg();//
     if (prepin) {
-      pinbuf = (char *)malloc_host(
-          isz + kInOutPadding, q.get_context());  // Pre-pin the buffer, for faster DMA
-    } else {                      // throughput, using malloc_host().
+      //Pre-pin the buffer, for faster DMA
+      //缓存可以快速访问DMA
+      pinbuf = (char *)malloc_host(isz + kInOutPadding, q.get_context());
+    } else {
+        // throughput, using malloc_host().
       pinbuf = new char[isz + kInOutPadding];
     }
     file.seekg(0, std::ios::beg);
@@ -251,15 +270,15 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
     return 1;
   }
 
-  int buffers_count = iterations;
+  int buffers_count = iterations;//缓存数量 iterations 1/200
 
   // Create an array of kernel info structures and create buffers for kernel
   // input/output. The buffers are re-used between iterations, but enough 
   // disjoint buffers are created to support double-buffering.
-  struct KernelInfo *kinfo[kNumEngines];
+  //初始化内核信息
+  struct KernelInfo *kinfo[kNumEngines];//内核信息数组
   for (size_t eng = 0; eng < kNumEngines; eng++) {
-    kinfo[eng] =
-        (struct KernelInfo *)malloc(sizeof(struct KernelInfo) * buffers_count);
+    kinfo[eng] =(struct KernelInfo *)malloc(sizeof(struct KernelInfo) * buffers_count);
     if (kinfo[eng] == NULL) {
       std::cout << "Cannot allocate kernel info buffer.\n";
       return 1;
@@ -268,9 +287,7 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
       kinfo[eng][i].file_size = isz;
       // Allocating slightly larger buffers (+ 16 * kVec) to account for
       // granularity of kernel writes
-      int outputSize =
-          ((isz + kInOutPadding) < kMinBufferSize) ? kMinBufferSize
-                                                   : (isz + kInOutPadding);
+      int outputSize =((isz + kInOutPadding) < kMinBufferSize) ? kMinBufferSize: (isz + kInOutPadding);
       const size_t input_alloc_size = isz + kInOutPadding;
 
       // Pre-pin buffer using malloc_host() to improve DMA bandwidth.
@@ -278,8 +295,7 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
         kinfo[eng][i].poutput_buffer = kinfo[eng][i - 3].poutput_buffer;
       } else {
         if (prepin) {
-          kinfo[eng][i].poutput_buffer =
-              (char *)malloc_host(outputSize, q.get_context());
+          kinfo[eng][i].poutput_buffer =(char *)malloc_host(outputSize, q.get_context());
         } else {
           kinfo[eng][i].poutput_buffer = (char *)malloc(outputSize);
         }
@@ -289,6 +305,7 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
           return 1;
         }
         // zero pages to fully allocate them
+        //分配初始内存
         memset(kinfo[eng][i].poutput_buffer, 0, outputSize);
       }
 
@@ -296,17 +313,10 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
       kinfo[eng][i].iteration = i;
       kinfo[eng][i].pref_buffer = pinbuf;
 
-      kinfo[eng][i].gzip_out_buf =
-          i >= 3 ? kinfo[eng][i - 3].gzip_out_buf
-                 : new buffer<struct GzipOutInfo, 1>(kMinBufferSize);
-      kinfo[eng][i].current_crc = i >= 3
-                                      ? kinfo[eng][i - 3].current_crc
-                                      : new buffer<unsigned, 1>(kMinBufferSize);
-      kinfo[eng][i].pibuf = i >= 3
-                                ? kinfo[eng][i - 3].pibuf
-                                : new buffer<char, 1>(input_alloc_size);
-      kinfo[eng][i].pobuf =
-          i >= 3 ? kinfo[eng][i - 3].pobuf : new buffer<char, 1>(outputSize);
+      kinfo[eng][i].gzip_out_buf = i >= 3 ? kinfo[eng][i - 3].gzip_out_buf: new buffer<struct GzipOutInfo, 1>(kMinBufferSize);
+      kinfo[eng][i].current_crc = i >= 3? kinfo[eng][i - 3].current_crc: new buffer<unsigned, 1>(kMinBufferSize);
+      kinfo[eng][i].pibuf = i >= 3? kinfo[eng][i - 3].pibuf: new buffer<char, 1>(input_alloc_size);
+      kinfo[eng][i].pobuf =i >= 3 ? kinfo[eng][i - 3].pobuf : new buffer<char, 1>(outputSize);
       kinfo[eng][i].pobuf_decompress = (char *)malloc(kinfo[eng][i].file_size);
     }
   }
@@ -332,9 +342,9 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
   for (int i = 0; i < buffers_count; i++) {
     for (size_t eng = 0; eng < kNumEngines; eng++) {
       // Transfer the input data, to be compressed, from host to device.
+      //将要压缩的输入数据从主机传输到设备
       e_input_dma[eng][i] = q.submit([&](handler &h) {
-        auto in_data =
-            kinfo[eng][i].pibuf->get_access<access::mode::discard_write>(h);
+        auto in_data =kinfo[eng][i].pibuf->get_access<access::mode::discard_write>(h);
         h.copy(kinfo[eng][i].pref_buffer, in_data);
       });
 
@@ -343,34 +353,43 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
       /*         LAUNCH GZIP ENGINE       */
       /************************************/
       /************************************/
-      SubmitGzipTasks(q, kinfo[eng][i].file_size, kinfo[eng][i].pibuf,
-                      kinfo[eng][i].pobuf, kinfo[eng][i].gzip_out_buf,
-                      kinfo[eng][i].current_crc, kinfo[eng][i].last_block,
-                      e_k_crc[eng][i], e_k_lz[eng][i], e_k_huff[eng][i], eng);
+      SubmitGzipTasks(q
+                      , kinfo[eng][i].file_size
+                      , kinfo[eng][i].pibuf
+                      ,kinfo[eng][i].pobuf
+                      , kinfo[eng][i].gzip_out_buf
+                      ,kinfo[eng][i].current_crc
+                      , kinfo[eng][i].last_block
+                      ,e_k_crc[eng][i]
+                      , e_k_lz[eng][i]
+                      , e_k_huff[eng][i]
+                      , eng);
 
       // Transfer the output (compressed) data from device to host.
+      //将输出(压缩)数据从设备传输到主机
       e_output_dma[eng][i] = q.submit([&](handler &h) {
         auto out_data = kinfo[eng][i].pobuf->get_access<access::mode::read>(h);
         h.copy(out_data, kinfo[eng][i].poutput_buffer);
       });
 
       // Transfer the file size of the compressed output file from device to host.
+      //将压缩输出文件的文件大小从设备传输到主机
       e_size_dma[eng][i] = q.submit([&](handler &h) {
-        auto out_data =
-            kinfo[eng][i].gzip_out_buf->get_access<access::mode::read>(h);
+        auto out_data =kinfo[eng][i].gzip_out_buf->get_access<access::mode::read>(h);
         h.copy(out_data, kinfo[eng][i].out_info);
       });
 
       // Transfer the CRC of the compressed output file from device to host.
+      //将压缩输出文件的CRC从设备传输到主机
       e_crc_dma[eng][i] = q.submit([&](handler &h) {
-        auto out_data =
-            kinfo[eng][i].current_crc->get_access<access::mode::read>(h);
+        auto out_data = kinfo[eng][i].current_crc->get_access<access::mode::read>(h);
         h.copy(out_data, kinfo[eng][i].buffer_crc);
       });
     }
   }
 
   // Wait for all kernels to complete
+  //等待内核处理
   for (int eng = 0; eng < kNumEngines; eng++) {
     for (int i = 0; i < buffers_count; i++) {
       e_output_dma[eng][i].wait();
@@ -401,9 +420,7 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
       // outside the quanta, is included in the overall CRC calculation via the following 
       // function that runs on the host. The last argument is the running CRC that was computed
       // on the FPGA.
-      kinfo[eng][i].buffer_crc[0] =
-          Crc32(kinfo[eng][i].pref_buffer, kinfo[eng][i].file_size,
-                kinfo[eng][i].buffer_crc[0]);
+      kinfo[eng][i].buffer_crc[0] =Crc32(kinfo[eng][i].pref_buffer, kinfo[eng][i].file_size,kinfo[eng][i].buffer_crc[0]);
       // Accumulate the compressed size across all iterations. Used to 
       // compute compression ratio later.
       compressed_sz[eng] += kinfo[eng][i].out_info[0].compression_sz;
@@ -431,6 +448,7 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
 
   // Decompress the output from engine-0 and compare against the input file. Only engine-0's
   // output is verified since all engines are fed the same input data.
+  //验证数据
   if (report && CompareGzipFiles(input_file, outfilenames[0])) {
     std::cout << "FAILED\n";
     return 1;

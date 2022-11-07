@@ -16,7 +16,7 @@
 // the latency to the receive the compile result).
 constexpr int BATCH_SIZE = 12;
 
-constexpr int kNumEngines = NUM_ENGINES;
+constexpr int kNumEngines = NUM_ENGINES;//值 1
 
 constexpr int kCRCIndex = 0;
 constexpr int kLZReductionIndex = 1;
@@ -27,8 +27,9 @@ constexpr int kStaticHuffmanIndex = 2;
 // kVecPow == 4 means kVec == 16.
 constexpr int kVecPow = 4;
 
+//值 16
 constexpr int kVec = 1 << kVecPow;
-constexpr int kVecX2 = 2 * kVec;
+constexpr int kVecX2 = 2 * kVec;//值 32
 
 constexpr int kHufTableSize = 256;
 
@@ -72,13 +73,13 @@ struct GzipOutInfo {
 };
 
 // kLen must be == kVec
-constexpr int kLen = kVec;
+constexpr int kLen = kVec;// 值 16
 
 // depth of the dictionary buffers
-constexpr int kDepth = 512;
+constexpr int kDepth = 512;//字典缓冲区的深度
 
 // Assumes kDepth is a power of 2 number.
-constexpr int kHashMask = kDepth - 1;
+constexpr int kHashMask = kDepth - 1;//512-1
 
 #define CONSTANT __constant
 
@@ -123,7 +124,7 @@ constexpr int kBLCodes = 19;
 
 constexpr int kMaxDistance = ((32 * 1024));
 
-constexpr int kMinBufferSize = 16384;
+constexpr int kMinBufferSize = 16384;//最小缓存大小 16*1024
 
 struct DictString {
   unsigned char s[kLen];

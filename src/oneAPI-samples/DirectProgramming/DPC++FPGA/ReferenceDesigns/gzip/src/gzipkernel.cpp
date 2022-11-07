@@ -600,16 +600,23 @@ int GetHuffBits(int len, int dist, unsigned char ch) {
 
 // assembles up to kVecX2 unsigned char values based on given huffman encoding
 // writes up to kMaxHuffcodeBits * kVecX2 bits to memory
-bool HufEnc(char *len, short *dist, unsigned char *data, unsigned int *outdata,
-            unsigned int *leftover, unsigned short *leftover_size) {
+/**
+ * 霍夫曼算法
+ * @param len
+ * @param dist
+ * @param data
+ * @param outdata
+ * @param leftover
+ * @param leftover_size
+ * @return
+ */
+bool HufEnc(char *len, short *dist, unsigned char *data, unsigned int *outdata,unsigned int *leftover, unsigned short *leftover_size) {
   // array that contains the bit position of each symbol
   unsigned short bitpos[kVec + 1];
   bitpos[0] = 0;
 
   Unroller<0, kVec>::step([&](int i) {
-    bitpos[i + 1] = bitpos[i] + (IsValid(len[i], dist[i], data[i])
-                                     ? GetHuffLen(len[i], dist[i], data[i])
-                                     : 0);
+    bitpos[i + 1] = bitpos[i] + (IsValid(len[i], dist[i], data[i])? GetHuffLen(len[i], dist[i], data[i]): 0);
   });
 
   // leftover is an array that carries huffman encoded data not yet written to
@@ -626,8 +633,7 @@ bool HufEnc(char *len, short *dist, unsigned char *data, unsigned int *outdata,
   *leftover_size &= ~(kVec * (kMaxHuffcodeBits * 2));
 
   // Adjust bitpos based on leftover offset from previous cycle
-  Unroller<0, kVec>::step(
-      [&](int i) { bitpos[i] += (prev_cycle_offset & 0x3fff); });
+  Unroller<0, kVec>::step([&](int i) { bitpos[i] += (prev_cycle_offset & 0x3fff); });
 
   // Huffman codes have any bit alignement, so they can spill
   // onto two shorts in the output array
@@ -649,13 +655,18 @@ bool HufEnc(char *len, short *dist, unsigned char *data, unsigned int *outdata,
     unsigned int temp1 = (unsigned int)temp;
     unsigned int temp2 = temp >> 32ULL;
 
-    if (IsValid(len[i], dist[i], data[i])) {
+    //TODO 貌似无用
+//    if (IsValid(len[i], dist[i], data[i])) {
+//      code[i].x = temp1;
+//      code[i].y = temp2;
+//    } else {
+//      code[i].x = temp1;
+//      code[i].y = temp2;
+//    }
+
       code[i].x = temp1;
       code[i].y = temp2;
-    } else {
-      code[i].x = temp1;
-      code[i].y = temp2;
-    }
+
   });
 
   // Iterate over all destination locations and gather the required data
@@ -667,21 +678,18 @@ bool HufEnc(char *len, short *dist, unsigned char *data, unsigned int *outdata,
     Unroller<0, kVec>::step([&](int j) {
       // figure out whether code[j] goes into bucket[i]
       bool match_first = ((bitpos[j] >> 5) & (kVec - 1)) == i;
-      bool match_second =
-          ((bitpos[j] >> 5) & (kVec - 1)) == ((i - 1) & (kVec - 1));
+      bool match_second =((bitpos[j] >> 5) & (kVec - 1)) == ((i - 1) & (kVec - 1));
 
       // if code[j] maps onto current bucket then OR its code, else OR with 0
-      unsigned int component =
-          match_first ? code[j].x : (match_second ? code[j].y : 0);
+      unsigned int component =match_first ? code[j].x : (match_second ? code[j].y : 0);
 
       // overflow from kVec shorts, need to move onto new_leftover
-      bool use_later =
-          (bitpos[j] & (kVec * (kMaxHuffcodeBits * 2))) ||
-          (match_second && (((bitpos[j] >> 5) & (kVec - 1)) == kVec - 1));
+      bool use_later =(bitpos[j] & (kVec * (kMaxHuffcodeBits * 2))) ||(match_second && (((bitpos[j] >> 5) & (kVec - 1)) == kVec - 1));
 
       // write to output
       outdata[i] |= use_later ? 0 : component;
       new_leftover[i] |= use_later ? component : 0;
+
     });
   });
 
@@ -718,1233 +726,1234 @@ void SubmitGzipTasksSingleEngine(
   using acc_dist_channel = ext::intel::pipe<class some_pipe, struct DistLen>;
   using acc_dist_channel_last = ext::intel::pipe<class some_pipe2, struct DistLen>;
 
+  //CRC校验
   e_crc = q.submit([&](handler &h) {
-    auto accessor_isz = block_size;
-    auto acc_pibuf = pibuf->get_access<access::mode::read>(h);
-    auto accresult_crc = result_crc->get_access<access::mode::discard_write>(h);
+    auto accessor_isz = block_size;//要压缩文件大小
+    auto acc_pibuf = pibuf->get_access<access::mode::read>(h);//要压缩的文件
+    auto accresult_crc = result_crc->get_access<access::mode::discard_write>(h);//crc信息
     h.single_task<CRC<engineID>>([=]() [[intel::kernel_args_restrict]] {
-      const unsigned int table64[64][16] = {
-          {
-              0x0,
-              0xf1da05aa,
-              0x38c50d15,
-              0xc91f08bf,
-              0x718a1a2a,
-              0x80501f80,
-              0x494f173f,
-              0xb8951295,
-              0xe3143454,
-              0x12ce31fe,
-              0xdbd13941,
-              0x2a0b3ceb,
-              0x929e2e7e,
-              0x63442bd4,
-              0xaa5b236b,
-              0x5b8126c1,
-          },
+        const unsigned int table64[64][16] =
+                {
+                        {
+                                0x0,
+                                0xf1da05aa,
+                                0x38c50d15,
+                                0xc91f08bf,
+                                0x718a1a2a,
+                                0x80501f80,
+                                0x494f173f,
+                                0xb8951295,
+                                0xe3143454,
+                                0x12ce31fe,
+                                0xdbd13941,
+                                0x2a0b3ceb,
+                                0x929e2e7e,
+                                0x63442bd4,
+                                0xaa5b236b,
+                                0x5b8126c1,
+                        },
 
-          {
-              0x0,
-              0x1d596ee9,
-              0x3ab2ddd2,
-              0x27ebb33b,
-              0x7565bba4,
-              0x683cd54d,
-              0x4fd76676,
-              0x528e089f,
-              0xeacb7748,
-              0xf79219a1,
-              0xd079aa9a,
-              0xcd20c473,
-              0x9faeccec,
-              0x82f7a205,
-              0xa51c113e,
-              0xb8457fd7,
-          },
+                        {
+                                0x0,
+                                0x1d596ee9,
+                                0x3ab2ddd2,
+                                0x27ebb33b,
+                                0x7565bba4,
+                                0x683cd54d,
+                                0x4fd76676,
+                                0x528e089f,
+                                0xeacb7748,
+                                0xf79219a1,
+                                0xd079aa9a,
+                                0xcd20c473,
+                                0x9faeccec,
+                                0x82f7a205,
+                                0xa51c113e,
+                                0xb8457fd7,
+                        },
 
-          {
-              0x0,
-              0xee7e8d1,
-              0x1dcfd1a2,
-              0x13283973,
-              0x3b9fa344,
-              0x35784b95,
-              0x265072e6,
-              0x28b79a37,
-              0x773f4688,
-              0x79d8ae59,
-              0x6af0972a,
-              0x64177ffb,
-              0x4ca0e5cc,
-              0x42470d1d,
-              0x516f346e,
-              0x5f88dcbf,
-          },
+                        {
+                                0x0,
+                                0xee7e8d1,
+                                0x1dcfd1a2,
+                                0x13283973,
+                                0x3b9fa344,
+                                0x35784b95,
+                                0x265072e6,
+                                0x28b79a37,
+                                0x773f4688,
+                                0x79d8ae59,
+                                0x6af0972a,
+                                0x64177ffb,
+                                0x4ca0e5cc,
+                                0x42470d1d,
+                                0x516f346e,
+                                0x5f88dcbf,
+                        },
 
-          {
-              0x0,
-              0xee7e8d10,
-              0x78c1c61,
-              0xe9f29171,
-              0xf1838c2,
-              0xe166b5d2,
-              0x89424a3,
-              0xe6eaa9b3,
-              0x1e307184,
-              0xf04efc94,
-              0x19bc6de5,
-              0xf7c2e0f5,
-              0x11284946,
-              0xff56c456,
-              0x16a45527,
-              0xf8dad837,
-          },
+                        {
+                                0x0,
+                                0xee7e8d10,
+                                0x78c1c61,
+                                0xe9f29171,
+                                0xf1838c2,
+                                0xe166b5d2,
+                                0x89424a3,
+                                0xe6eaa9b3,
+                                0x1e307184,
+                                0xf04efc94,
+                                0x19bc6de5,
+                                0xf7c2e0f5,
+                                0x11284946,
+                                0xff56c456,
+                                0x16a45527,
+                                0xf8dad837,
+                        },
 
-          {
-              0x0,
-              0x3c60e308,
-              0x78c1c610,
-              0x44a12518,
-              0xf1838c20,
-              0xcde36f28,
-              0x89424a30,
-              0xb522a938,
-              0x38761e01,
-              0x416fd09,
-              0x40b7d811,
-              0x7cd73b19,
-              0xc9f59221,
-              0xf5957129,
-              0xb1345431,
-              0x8d54b739,
-          },
+                        {
+                                0x0,
+                                0x3c60e308,
+                                0x78c1c610,
+                                0x44a12518,
+                                0xf1838c20,
+                                0xcde36f28,
+                                0x89424a30,
+                                0xb522a938,
+                                0x38761e01,
+                                0x416fd09,
+                                0x40b7d811,
+                                0x7cd73b19,
+                                0xc9f59221,
+                                0xf5957129,
+                                0xb1345431,
+                                0x8d54b739,
+                        },
 
-          {
-              0x0,
-              0x70ec3c02,
-              0xe1d87804,
-              0x91344406,
-              0x18c1f649,
-              0x682dca4b,
-              0xf9198e4d,
-              0x89f5b24f,
-              0x3183ec92,
-              0x416fd090,
-              0xd05b9496,
-              0xa0b7a894,
-              0x29421adb,
-              0x59ae26d9,
-              0xc89a62df,
-              0xb8765edd,
-          },
+                        {
+                                0x0,
+                                0x70ec3c02,
+                                0xe1d87804,
+                                0x91344406,
+                                0x18c1f649,
+                                0x682dca4b,
+                                0xf9198e4d,
+                                0x89f5b24f,
+                                0x3183ec92,
+                                0x416fd090,
+                                0xd05b9496,
+                                0xa0b7a894,
+                                0x29421adb,
+                                0x59ae26d9,
+                                0xc89a62df,
+                                0xb8765edd,
+                        },
 
-          {
-              0x0,
-              0x6307d924,
-              0xc60fb248,
-              0xa5086b6c,
-              0x576e62d1,
-              0x3469bbf5,
-              0x9161d099,
-              0xf26609bd,
-              0xaedcc5a2,
-              0xcddb1c86,
-              0x68d377ea,
-              0xbd4aece,
-              0xf9b2a773,
-              0x9ab57e57,
-              0x3fbd153b,
-              0x5cbacc1f,
-          },
+                        {
+                                0x0,
+                                0x6307d924,
+                                0xc60fb248,
+                                0xa5086b6c,
+                                0x576e62d1,
+                                0x3469bbf5,
+                                0x9161d099,
+                                0xf26609bd,
+                                0xaedcc5a2,
+                                0xcddb1c86,
+                                0x68d377ea,
+                                0xbd4aece,
+                                0xf9b2a773,
+                                0x9ab57e57,
+                                0x3fbd153b,
+                                0x5cbacc1f,
+                        },
 
-          {
-              0x0,
-              0x86c88d05,
-              0xd6e01c4b,
-              0x5028914e,
-              0x76b13ed7,
-              0xf079b3d2,
-              0xa051229c,
-              0x2699af99,
-              0xed627dae,
-              0x6baaf0ab,
-              0x3b8261e5,
-              0xbd4aece0,
-              0x9bd34379,
-              0x1d1bce7c,
-              0x4d335f32,
-              0xcbfbd237,
-          },
+                        {
+                                0x0,
+                                0x86c88d05,
+                                0xd6e01c4b,
+                                0x5028914e,
+                                0x76b13ed7,
+                                0xf079b3d2,
+                                0xa051229c,
+                                0x2699af99,
+                                0xed627dae,
+                                0x6baaf0ab,
+                                0x3b8261e5,
+                                0xbd4aece0,
+                                0x9bd34379,
+                                0x1d1bce7c,
+                                0x4d335f32,
+                                0xcbfbd237,
+                        },
 
-          {
-              0x0,
-              0x1b5fd1d,
-              0x36bfa3a,
-              0x2de0727,
-              0x6d7f474,
-              0x7620969,
-              0x5bc0e4e,
-              0x409f353,
-              0xdafe8e8,
-              0xc1a15f5,
-              0xec412d2,
-              0xf71efcf,
-              0xb781c9c,
-              0xacde181,
-              0x813e6a6,
-              0x9a61bbb,
-          },
+                        {
+                                0x0,
+                                0x1b5fd1d,
+                                0x36bfa3a,
+                                0x2de0727,
+                                0x6d7f474,
+                                0x7620969,
+                                0x5bc0e4e,
+                                0x409f353,
+                                0xdafe8e8,
+                                0xc1a15f5,
+                                0xec412d2,
+                                0xf71efcf,
+                                0xb781c9c,
+                                0xacde181,
+                                0x813e6a6,
+                                0x9a61bbb,
+                        },
 
-          {
-              0x0,
-              0x1b5fd1d0,
-              0x36bfa3a0,
-              0x2de07270,
-              0x6d7f4740,
-              0x76209690,
-              0x5bc0e4e0,
-              0x409f3530,
-              0xdafe8e80,
-              0xc1a15f50,
-              0xec412d20,
-              0xf71efcf0,
-              0xb781c9c0,
-              0xacde1810,
-              0x813e6a60,
-              0x9a61bbb0,
-          },
+                        {
+                                0x0,
+                                0x1b5fd1d0,
+                                0x36bfa3a0,
+                                0x2de07270,
+                                0x6d7f4740,
+                                0x76209690,
+                                0x5bc0e4e0,
+                                0x409f3530,
+                                0xdafe8e80,
+                                0xc1a15f50,
+                                0xec412d20,
+                                0xf71efcf0,
+                                0xb781c9c0,
+                                0xacde1810,
+                                0x813e6a60,
+                                0x9a61bbb0,
+                        },
 
-          {
-              0x0,
-              0x6e8c1b41,
-              0xdd183682,
-              0xb3942dc3,
-              0x61416b45,
-              0xfcd7004,
-              0xbc595dc7,
-              0xd2d54686,
-              0xc282d68a,
-              0xac0ecdcb,
-              0x1f9ae008,
-              0x7116fb49,
-              0xa3c3bdcf,
-              0xcd4fa68e,
-              0x7edb8b4d,
-              0x1057900c,
-          },
+                        {
+                                0x0,
+                                0x6e8c1b41,
+                                0xdd183682,
+                                0xb3942dc3,
+                                0x61416b45,
+                                0xfcd7004,
+                                0xbc595dc7,
+                                0xd2d54686,
+                                0xc282d68a,
+                                0xac0ecdcb,
+                                0x1f9ae008,
+                                0x7116fb49,
+                                0xa3c3bdcf,
+                                0xcd4fa68e,
+                                0x7edb8b4d,
+                                0x1057900c,
+                        },
 
-          {
-              0x0,
-              0x5e74ab55,
-              0xbce956aa,
-              0xe29dfdff,
-              0xa2a3ab15,
-              0xfcd70040,
-              0x1e4afdbf,
-              0x403e56ea,
-              0x9e36506b,
-              0xc042fb3e,
-              0x22df06c1,
-              0x7cabad94,
-              0x3c95fb7e,
-              0x62e1502b,
-              0x807cadd4,
-              0xde080681,
-          },
+                        {
+                                0x0,
+                                0x5e74ab55,
+                                0xbce956aa,
+                                0xe29dfdff,
+                                0xa2a3ab15,
+                                0xfcd70040,
+                                0x1e4afdbf,
+                                0x403e56ea,
+                                0x9e36506b,
+                                0xc042fb3e,
+                                0x22df06c1,
+                                0x7cabad94,
+                                0x3c95fb7e,
+                                0x62e1502b,
+                                0x807cadd4,
+                                0xde080681,
+                        },
 
-          {
-              0x0,
-              0xe71da697,
-              0x154a4b6f,
-              0xf257edf8,
-              0x2a9496de,
-              0xcd893049,
-              0x3fdeddb1,
-              0xd8c37b26,
-              0x55292dbc,
-              0xb2348b2b,
-              0x406366d3,
-              0xa77ec044,
-              0x7fbdbb62,
-              0x98a01df5,
-              0x6af7f00d,
-              0x8dea569a,
-          },
+                        {
+                                0x0,
+                                0xe71da697,
+                                0x154a4b6f,
+                                0xf257edf8,
+                                0x2a9496de,
+                                0xcd893049,
+                                0x3fdeddb1,
+                                0xd8c37b26,
+                                0x55292dbc,
+                                0xb2348b2b,
+                                0x406366d3,
+                                0xa77ec044,
+                                0x7fbdbb62,
+                                0x98a01df5,
+                                0x6af7f00d,
+                                0x8dea569a,
+                        },
 
-          {
-              0x0,
-              0xaa525b78,
-              0x8fd5b0b1,
-              0x2587ebc9,
-              0xc4da6723,
-              0x6e883c5b,
-              0x4b0fd792,
-              0xe15d8cea,
-              0x52c5c807,
-              0xf897937f,
-              0xdd1078b6,
-              0x774223ce,
-              0x961faf24,
-              0x3c4df45c,
-              0x19ca1f95,
-              0xb39844ed,
-          },
+                        {
+                                0x0,
+                                0xaa525b78,
+                                0x8fd5b0b1,
+                                0x2587ebc9,
+                                0xc4da6723,
+                                0x6e883c5b,
+                                0x4b0fd792,
+                                0xe15d8cea,
+                                0x52c5c807,
+                                0xf897937f,
+                                0xdd1078b6,
+                                0x774223ce,
+                                0x961faf24,
+                                0x3c4df45c,
+                                0x19ca1f95,
+                                0xb39844ed,
+                        },
 
-          {
-              0x0,
-              0xa58b900e,
-              0x9066265d,
-              0x35edb653,
-              0xfbbd4afb,
-              0x5e36daf5,
-              0x6bdb6ca6,
-              0xce50fca8,
-              0x2c0b93b7,
-              0x898003b9,
-              0xbc6db5ea,
-              0x19e625e4,
-              0xd7b6d94c,
-              0x723d4942,
-              0x47d0ff11,
-              0xe25b6f1f,
-          },
+                        {
+                                0x0,
+                                0xa58b900e,
+                                0x9066265d,
+                                0x35edb653,
+                                0xfbbd4afb,
+                                0x5e36daf5,
+                                0x6bdb6ca6,
+                                0xce50fca8,
+                                0x2c0b93b7,
+                                0x898003b9,
+                                0xbc6db5ea,
+                                0x19e625e4,
+                                0xd7b6d94c,
+                                0x723d4942,
+                                0x47d0ff11,
+                                0xe25b6f1f,
+                        },
 
-          {
-              0x0,
-              0x5817276e,
-              0xb02e4edc,
-              0xe83969b2,
-              0xbb2d9bf9,
-              0xe33abc97,
-              0xb03d525,
-              0x5314f24b,
-              0xad2a31b3,
-              0xf53d16dd,
-              0x1d047f6f,
-              0x45135801,
-              0x1607aa4a,
-              0x4e108d24,
-              0xa629e496,
-              0xfe3ec3f8,
-          },
+                        {
+                                0x0,
+                                0x5817276e,
+                                0xb02e4edc,
+                                0xe83969b2,
+                                0xbb2d9bf9,
+                                0xe33abc97,
+                                0xb03d525,
+                                0x5314f24b,
+                                0xad2a31b3,
+                                0xf53d16dd,
+                                0x1d047f6f,
+                                0x45135801,
+                                0x1607aa4a,
+                                0x4e108d24,
+                                0xa629e496,
+                                0xfe3ec3f8,
+                        },
 
-          {
-              0x0,
-              0x81256527,
-              0xd93bcc0f,
-              0x581ea928,
-              0x69069e5f,
-              0xe823fb78,
-              0xb03d5250,
-              0x31183777,
-              0xd20d3cbe,
-              0x53285999,
-              0xb36f0b1,
-              0x8a139596,
-              0xbb0ba2e1,
-              0x3a2ec7c6,
-              0x62306eee,
-              0xe3150bc9,
-          },
+                        {
+                                0x0,
+                                0x81256527,
+                                0xd93bcc0f,
+                                0x581ea928,
+                                0x69069e5f,
+                                0xe823fb78,
+                                0xb03d5250,
+                                0x31183777,
+                                0xd20d3cbe,
+                                0x53285999,
+                                0xb36f0b1,
+                                0x8a139596,
+                                0xbb0ba2e1,
+                                0x3a2ec7c6,
+                                0x62306eee,
+                                0xe3150bc9,
+                        },
 
-          {
-              0x0,
-              0x7f6b7f3d,
-              0xfed6fe7a,
-              0x81bd8147,
-              0x26dcfab5,
-              0x59b78588,
-              0xd80a04cf,
-              0xa7617bf2,
-              0x4db9f56a,
-              0x32d28a57,
-              0xb36f0b10,
-              0xcc04742d,
-              0x6b650fdf,
-              0x140e70e2,
-              0x95b3f1a5,
-              0xead88e98,
-          },
+                        {
+                                0x0,
+                                0x7f6b7f3d,
+                                0xfed6fe7a,
+                                0x81bd8147,
+                                0x26dcfab5,
+                                0x59b78588,
+                                0xd80a04cf,
+                                0xa7617bf2,
+                                0x4db9f56a,
+                                0x32d28a57,
+                                0xb36f0b10,
+                                0xcc04742d,
+                                0x6b650fdf,
+                                0x140e70e2,
+                                0x95b3f1a5,
+                                0xead88e98,
+                        },
 
-          {
-              0x0,
-              0x9b73ead4,
-              0xed96d3e9,
-              0x76e5393d,
-              0x5ca193,
-              0x9b2f4b47,
-              0xedca727a,
-              0x76b998ae,
-              0xb94326,
-              0x9bcaa9f2,
-              0xed2f90cf,
-              0x765c7a1b,
-              0xe5e2b5,
-              0x9b960861,
-              0xed73315c,
-              0x7600db88,
-          },
+                        {
+                                0x0,
+                                0x9b73ead4,
+                                0xed96d3e9,
+                                0x76e5393d,
+                                0x5ca193,
+                                0x9b2f4b47,
+                                0xedca727a,
+                                0x76b998ae,
+                                0xb94326,
+                                0x9bcaa9f2,
+                                0xed2f90cf,
+                                0x765c7a1b,
+                                0xe5e2b5,
+                                0x9b960861,
+                                0xed73315c,
+                                0x7600db88,
+                        },
 
-          {
-              0x0,
-              0x172864c,
-              0x2e50c98,
-              0x3978ad4,
-              0x5ca1930,
-              0x4b89f7c,
-              0x72f15a8,
-              0x65d93e4,
-              0xb943260,
-              0xae6b42c,
-              0x9713ef8,
-              0x803b8b4,
-              0xe5e2b50,
-              0xf2cad1c,
-              0xcbb27c8,
-              0xdc9a184,
-          },
+                        {
+                                0x0,
+                                0x172864c,
+                                0x2e50c98,
+                                0x3978ad4,
+                                0x5ca1930,
+                                0x4b89f7c,
+                                0x72f15a8,
+                                0x65d93e4,
+                                0xb943260,
+                                0xae6b42c,
+                                0x9713ef8,
+                                0x803b8b4,
+                                0xe5e2b50,
+                                0xf2cad1c,
+                                0xcbb27c8,
+                                0xdc9a184,
+                        },
 
-          {
-              0x0,
-              0x172864c0,
-              0x2e50c980,
-              0x3978ad40,
-              0x5ca19300,
-              0x4b89f7c0,
-              0x72f15a80,
-              0x65d93e40,
-              0xb9432600,
-              0xae6b42c0,
-              0x9713ef80,
-              0x803b8b40,
-              0xe5e2b500,
-              0xf2cad1c0,
-              0xcbb27c80,
-              0xdc9a1840,
-          },
+                        {
+                                0x0,
+                                0x172864c0,
+                                0x2e50c980,
+                                0x3978ad40,
+                                0x5ca19300,
+                                0x4b89f7c0,
+                                0x72f15a80,
+                                0x65d93e40,
+                                0xb9432600,
+                                0xae6b42c0,
+                                0x9713ef80,
+                                0x803b8b40,
+                                0xe5e2b500,
+                                0xf2cad1c0,
+                                0xcbb27c80,
+                                0xdc9a1840,
+                        },
 
-          {
-              0x0,
-              0xa9f74a41,
-              0x889f92c3,
-              0x2168d882,
-              0xca4e23c7,
-              0x63b96986,
-              0x42d1b104,
-              0xeb26fb45,
-              0x4fed41cf,
-              0xe61a0b8e,
-              0xc772d30c,
-              0x6e85994d,
-              0x85a36208,
-              0x2c542849,
-              0xd3cf0cb,
-              0xa4cbba8a,
-          },
+                        {
+                                0x0,
+                                0xa9f74a41,
+                                0x889f92c3,
+                                0x2168d882,
+                                0xca4e23c7,
+                                0x63b96986,
+                                0x42d1b104,
+                                0xeb26fb45,
+                                0x4fed41cf,
+                                0xe61a0b8e,
+                                0xc772d30c,
+                                0x6e85994d,
+                                0x85a36208,
+                                0x2c542849,
+                                0xd3cf0cb,
+                                0xa4cbba8a,
+                        },
 
-          {
-              0x0,
-              0x9fda839e,
-              0xe4c4017d,
-              0x7b1e82e3,
-              0x12f904bb,
-              0x8d238725,
-              0xf63d05c6,
-              0x69e78658,
-              0x25f20976,
-              0xba288ae8,
-              0xc136080b,
-              0x5eec8b95,
-              0x370b0dcd,
-              0xa8d18e53,
-              0xd3cf0cb0,
-              0x4c158f2e,
-          },
+                        {
+                                0x0,
+                                0x9fda839e,
+                                0xe4c4017d,
+                                0x7b1e82e3,
+                                0x12f904bb,
+                                0x8d238725,
+                                0xf63d05c6,
+                                0x69e78658,
+                                0x25f20976,
+                                0xba288ae8,
+                                0xc136080b,
+                                0x5eec8b95,
+                                0x370b0dcd,
+                                0xa8d18e53,
+                                0xd3cf0cb0,
+                                0x4c158f2e,
+                        },
 
-          {
-              0x0,
-              0x4be412ec,
-              0x97c825d8,
-              0xdc2c3734,
-              0xf4e14df1,
-              0xbf055f1d,
-              0x63296829,
-              0x28cd7ac5,
-              0x32b39da3,
-              0x79578f4f,
-              0xa57bb87b,
-              0xee9faa97,
-              0xc652d052,
-              0x8db6c2be,
-              0x519af58a,
-              0x1a7ee766,
-          },
+                        {
+                                0x0,
+                                0x4be412ec,
+                                0x97c825d8,
+                                0xdc2c3734,
+                                0xf4e14df1,
+                                0xbf055f1d,
+                                0x63296829,
+                                0x28cd7ac5,
+                                0x32b39da3,
+                                0x79578f4f,
+                                0xa57bb87b,
+                                0xee9faa97,
+                                0xc652d052,
+                                0x8db6c2be,
+                                0x519af58a,
+                                0x1a7ee766,
+                        },
 
-          {
-              0x0,
-              0x65673b46,
-              0xcace768c,
-              0xafa94dca,
-              0x4eedeb59,
-              0x2b8ad01f,
-              0x84239dd5,
-              0xe144a693,
-              0x9ddbd6b2,
-              0xf8bcedf4,
-              0x5715a03e,
-              0x32729b78,
-              0xd3363deb,
-              0xb65106ad,
-              0x19f84b67,
-              0x7c9f7021,
-          },
+                        {
+                                0x0,
+                                0x65673b46,
+                                0xcace768c,
+                                0xafa94dca,
+                                0x4eedeb59,
+                                0x2b8ad01f,
+                                0x84239dd5,
+                                0xe144a693,
+                                0x9ddbd6b2,
+                                0xf8bcedf4,
+                                0x5715a03e,
+                                0x32729b78,
+                                0xd3363deb,
+                                0xb65106ad,
+                                0x19f84b67,
+                                0x7c9f7021,
+                        },
 
-          {
-              0x0,
-              0xe0c6ab25,
-              0x1afc500b,
-              0xfa3afb2e,
-              0x35f8a016,
-              0xd53e0b33,
-              0x2f04f01d,
-              0xcfc25b38,
-              0x6bf1402c,
-              0x8b37eb09,
-              0x710d1027,
-              0x91cbbb02,
-              0x5e09e03a,
-              0xbecf4b1f,
-              0x44f5b031,
-              0xa4331b14,
-          },
+                        {
+                                0x0,
+                                0xe0c6ab25,
+                                0x1afc500b,
+                                0xfa3afb2e,
+                                0x35f8a016,
+                                0xd53e0b33,
+                                0x2f04f01d,
+                                0xcfc25b38,
+                                0x6bf1402c,
+                                0x8b37eb09,
+                                0x710d1027,
+                                0x91cbbb02,
+                                0x5e09e03a,
+                                0xbecf4b1f,
+                                0x44f5b031,
+                                0xa4331b14,
+                        },
 
-          {
-              0x0,
-              0xd7e28058,
-              0x74b406f1,
-              0xa35686a9,
-              0xe9680de2,
-              0x3e8a8dba,
-              0x9ddc0b13,
-              0x4a3e8b4b,
-              0x9a11d85,
-              0xde439ddd,
-              0x7d151b74,
-              0xaaf79b2c,
-              0xe0c91067,
-              0x372b903f,
-              0x947d1696,
-              0x439f96ce,
-          },
+                        {
+                                0x0,
+                                0xd7e28058,
+                                0x74b406f1,
+                                0xa35686a9,
+                                0xe9680de2,
+                                0x3e8a8dba,
+                                0x9ddc0b13,
+                                0x4a3e8b4b,
+                                0x9a11d85,
+                                0xde439ddd,
+                                0x7d151b74,
+                                0xaaf79b2c,
+                                0xe0c91067,
+                                0x372b903f,
+                                0x947d1696,
+                                0x439f96ce,
+                        },
 
-          {
-              0x0,
-              0x13423b0a,
-              0x26847614,
-              0x35c64d1e,
-              0x4d08ec28,
-              0x5e4ad722,
-              0x6b8c9a3c,
-              0x78cea136,
-              0x9a11d850,
-              0x8953e35a,
-              0xbc95ae44,
-              0xafd7954e,
-              0xd7193478,
-              0xc45b0f72,
-              0xf19d426c,
-              0xe2df7966,
-          },
+                        {
+                                0x0,
+                                0x13423b0a,
+                                0x26847614,
+                                0x35c64d1e,
+                                0x4d08ec28,
+                                0x5e4ad722,
+                                0x6b8c9a3c,
+                                0x78cea136,
+                                0x9a11d850,
+                                0x8953e35a,
+                                0xbc95ae44,
+                                0xafd7954e,
+                                0xd7193478,
+                                0xc45b0f72,
+                                0xf19d426c,
+                                0xe2df7966,
+                        },
 
-          {
-              0x0,
-              0xef52b6e1,
-              0x5d46b83,
-              0xea86dd62,
-              0xba8d706,
-              0xe4fa61e7,
-              0xe7cbc85,
-              0xe12e0a64,
-              0x1751ae0c,
-              0xf80318ed,
-              0x1285c58f,
-              0xfdd7736e,
-              0x1cf9790a,
-              0xf3abcfeb,
-              0x192d1289,
-              0xf67fa468,
-          },
+                        {
+                                0x0,
+                                0xef52b6e1,
+                                0x5d46b83,
+                                0xea86dd62,
+                                0xba8d706,
+                                0xe4fa61e7,
+                                0xe7cbc85,
+                                0xe12e0a64,
+                                0x1751ae0c,
+                                0xf80318ed,
+                                0x1285c58f,
+                                0xfdd7736e,
+                                0x1cf9790a,
+                                0xf3abcfeb,
+                                0x192d1289,
+                                0xf67fa468,
+                        },
 
-          {
-              0x0,
-              0x2ea35c18,
-              0x5d46b830,
-              0x73e5e428,
-              0xba8d7060,
-              0x942e2c78,
-              0xe7cbc850,
-              0xc9689448,
-              0xae6be681,
-              0x80c8ba99,
-              0xf32d5eb1,
-              0xdd8e02a9,
-              0x14e696e1,
-              0x3a45caf9,
-              0x49a02ed1,
-              0x670372c9,
-          },
+                        {
+                                0x0,
+                                0x2ea35c18,
+                                0x5d46b830,
+                                0x73e5e428,
+                                0xba8d7060,
+                                0x942e2c78,
+                                0xe7cbc850,
+                                0xc9689448,
+                                0xae6be681,
+                                0x80c8ba99,
+                                0xf32d5eb1,
+                                0xdd8e02a9,
+                                0x14e696e1,
+                                0x3a45caf9,
+                                0x49a02ed1,
+                                0x670372c9,
+                        },
 
-          {
-              0x0,
-              0x87a6cb43,
-              0xd43c90c7,
-              0x539a5b84,
-              0x730827cf,
-              0xf4aeec8c,
-              0xa734b708,
-              0x20927c4b,
-              0xe6104f9e,
-              0x61b684dd,
-              0x322cdf59,
-              0xb58a141a,
-              0x95186851,
-              0x12bea312,
-              0x4124f896,
-              0xc68233d5,
-          },
+                        {
+                                0x0,
+                                0x87a6cb43,
+                                0xd43c90c7,
+                                0x539a5b84,
+                                0x730827cf,
+                                0xf4aeec8c,
+                                0xa734b708,
+                                0x20927c4b,
+                                0xe6104f9e,
+                                0x61b684dd,
+                                0x322cdf59,
+                                0xb58a141a,
+                                0x95186851,
+                                0x12bea312,
+                                0x4124f896,
+                                0xc68233d5,
+                        },
 
-          {
-              0x0,
-              0x1751997d,
-              0x2ea332fa,
-              0x39f2ab87,
-              0x5d4665f4,
-              0x4a17fc89,
-              0x73e5570e,
-              0x64b4ce73,
-              0xba8ccbe8,
-              0xaddd5295,
-              0x942ff912,
-              0x837e606f,
-              0xe7caae1c,
-              0xf09b3761,
-              0xc9699ce6,
-              0xde38059b,
-          },
+                        {
+                                0x0,
+                                0x1751997d,
+                                0x2ea332fa,
+                                0x39f2ab87,
+                                0x5d4665f4,
+                                0x4a17fc89,
+                                0x73e5570e,
+                                0x64b4ce73,
+                                0xba8ccbe8,
+                                0xaddd5295,
+                                0x942ff912,
+                                0x837e606f,
+                                0xe7caae1c,
+                                0xf09b3761,
+                                0xc9699ce6,
+                                0xde38059b,
+                        },
 
-          {
-              0x0,
-              0xae689191,
-              0x87a02563,
-              0x29c8b4f2,
-              0xd4314c87,
-              0x7a59dd16,
-              0x539169e4,
-              0xfdf9f875,
-              0x73139f4f,
-              0xdd7b0ede,
-              0xf4b3ba2c,
-              0x5adb2bbd,
-              0xa722d3c8,
-              0x94a4259,
-              0x2082f6ab,
-              0x8eea673a,
-          },
+                        {
+                                0x0,
+                                0xae689191,
+                                0x87a02563,
+                                0x29c8b4f2,
+                                0xd4314c87,
+                                0x7a59dd16,
+                                0x539169e4,
+                                0xfdf9f875,
+                                0x73139f4f,
+                                0xdd7b0ede,
+                                0xf4b3ba2c,
+                                0x5adb2bbd,
+                                0xa722d3c8,
+                                0x94a4259,
+                                0x2082f6ab,
+                                0x8eea673a,
+                        },
 
-          {
-              0x0,
-              0xe6273e9e,
-              0x173f7b7d,
-              0xf11845e3,
-              0x2e7ef6fa,
-              0xc859c864,
-              0x39418d87,
-              0xdf66b319,
-              0x5cfdedf4,
-              0xbadad36a,
-              0x4bc29689,
-              0xade5a817,
-              0x72831b0e,
-              0x94a42590,
-              0x65bc6073,
-              0x839b5eed,
-          },
+                        {
+                                0x0,
+                                0xe6273e9e,
+                                0x173f7b7d,
+                                0xf11845e3,
+                                0x2e7ef6fa,
+                                0xc859c864,
+                                0x39418d87,
+                                0xdf66b319,
+                                0x5cfdedf4,
+                                0xbadad36a,
+                                0x4bc29689,
+                                0xade5a817,
+                                0x72831b0e,
+                                0x94a42590,
+                                0x65bc6073,
+                                0x839b5eed,
+                        },
 
-          {
-              0x0,
-              0xb9fbdbe8,
-              0xa886b191,
-              0x117d6a79,
-              0x8a7c6563,
-              0x3387be8b,
-              0x22fad4f2,
-              0x9b010f1a,
-              0xcf89cc87,
-              0x7672176f,
-              0x670f7d16,
-              0xdef4a6fe,
-              0x45f5a9e4,
-              0xfc0e720c,
-              0xed731875,
-              0x5488c39d,
-          },
+                        {
+                                0x0,
+                                0xb9fbdbe8,
+                                0xa886b191,
+                                0x117d6a79,
+                                0x8a7c6563,
+                                0x3387be8b,
+                                0x22fad4f2,
+                                0x9b010f1a,
+                                0xcf89cc87,
+                                0x7672176f,
+                                0x670f7d16,
+                                0xdef4a6fe,
+                                0x45f5a9e4,
+                                0xfc0e720c,
+                                0xed731875,
+                                0x5488c39d,
+                        },
 
-          {
-              0x0,
-              0x44629f4f,
-              0x88c53e9e,
-              0xcca7a1d1,
-              0xcafb7b7d,
-              0x8e99e432,
-              0x423e45e3,
-              0x65cdaac,
-              0x4e87f0bb,
-              0xae56ff4,
-              0xc642ce25,
-              0x8220516a,
-              0x847c8bc6,
-              0xc01e1489,
-              0xcb9b558,
-              0x48db2a17,
-          },
+                        {
+                                0x0,
+                                0x44629f4f,
+                                0x88c53e9e,
+                                0xcca7a1d1,
+                                0xcafb7b7d,
+                                0x8e99e432,
+                                0x423e45e3,
+                                0x65cdaac,
+                                0x4e87f0bb,
+                                0xae56ff4,
+                                0xc642ce25,
+                                0x8220516a,
+                                0x847c8bc6,
+                                0xc01e1489,
+                                0xcb9b558,
+                                0x48db2a17,
+                        },
 
-          {
-              0x0,
-              0x9d0fe176,
-              0xe16ec4ad,
-              0x7c6125db,
-              0x19ac8f1b,
-              0x84a36e6d,
-              0xf8c24bb6,
-              0x65cdaac0,
-              0x33591e36,
-              0xae56ff40,
-              0xd237da9b,
-              0x4f383bed,
-              0x2af5912d,
-              0xb7fa705b,
-              0xcb9b5580,
-              0x5694b4f6,
-          },
+                        {
+                                0x0,
+                                0x9d0fe176,
+                                0xe16ec4ad,
+                                0x7c6125db,
+                                0x19ac8f1b,
+                                0x84a36e6d,
+                                0xf8c24bb6,
+                                0x65cdaac0,
+                                0x33591e36,
+                                0xae56ff40,
+                                0xd237da9b,
+                                0x4f383bed,
+                                0x2af5912d,
+                                0xb7fa705b,
+                                0xcb9b5580,
+                                0x5694b4f6,
+                        },
 
-          {
-              0x0,
-              0x66b23c6c,
-              0xcd6478d8,
-              0xabd644b4,
-              0x41b9f7f1,
-              0x270bcb9d,
-              0x8cdd8f29,
-              0xea6fb345,
-              0x8373efe2,
-              0xe5c1d38e,
-              0x4e17973a,
-              0x28a5ab56,
-              0xc2ca1813,
-              0xa478247f,
-              0xfae60cb,
-              0x691c5ca7,
-          },
+                        {
+                                0x0,
+                                0x66b23c6c,
+                                0xcd6478d8,
+                                0xabd644b4,
+                                0x41b9f7f1,
+                                0x270bcb9d,
+                                0x8cdd8f29,
+                                0xea6fb345,
+                                0x8373efe2,
+                                0xe5c1d38e,
+                                0x4e17973a,
+                                0x28a5ab56,
+                                0xc2ca1813,
+                                0xa478247f,
+                                0xfae60cb,
+                                0x691c5ca7,
+                        },
 
-          {
-              0x0,
-              0xdd96d985,
-              0x605cb54b,
-              0xbdca6cce,
-              0xc0b96a96,
-              0x1d2fb313,
-              0xa0e5dfdd,
-              0x7d730658,
-              0x5a03d36d,
-              0x87950ae8,
-              0x3a5f6626,
-              0xe7c9bfa3,
-              0x9abab9fb,
-              0x472c607e,
-              0xfae60cb0,
-              0x2770d535,
-          },
+                        {
+                                0x0,
+                                0xdd96d985,
+                                0x605cb54b,
+                                0xbdca6cce,
+                                0xc0b96a96,
+                                0x1d2fb313,
+                                0xa0e5dfdd,
+                                0x7d730658,
+                                0x5a03d36d,
+                                0x87950ae8,
+                                0x3a5f6626,
+                                0xe7c9bfa3,
+                                0x9abab9fb,
+                                0x472c607e,
+                                0xfae60cb0,
+                                0x2770d535,
+                        },
 
-          {
-              0x0,
-              0xb407a6da,
-              0xb37e4bf5,
-              0x779ed2f,
-              0xbd8d91ab,
-              0x98a3771,
-              0xef3da5e,
-              0xbaf47c84,
-              0xa06a2517,
-              0x146d83cd,
-              0x13146ee2,
-              0xa713c838,
-              0x1de7b4bc,
-              0xa9e01266,
-              0xae99ff49,
-              0x1a9e5993,
-          },
+                        {
+                                0x0,
+                                0xb407a6da,
+                                0xb37e4bf5,
+                                0x779ed2f,
+                                0xbd8d91ab,
+                                0x98a3771,
+                                0xef3da5e,
+                                0xbaf47c84,
+                                0xa06a2517,
+                                0x146d83cd,
+                                0x13146ee2,
+                                0xa713c838,
+                                0x1de7b4bc,
+                                0xa9e01266,
+                                0xae99ff49,
+                                0x1a9e5993,
+                        },
 
-          {
-              0x0,
-              0x9ba54c6f,
-              0xec3b9e9f,
-              0x779ed2f0,
-              0x3063b7f,
-              0x98a37710,
-              0xef3da5e0,
-              0x7498e98f,
-              0x60c76fe,
-              0x9da93a91,
-              0xea37e861,
-              0x7192a40e,
-              0x50a4d81,
-              0x9eaf01ee,
-              0xe931d31e,
-              0x72949f71,
-          },
+                        {
+                                0x0,
+                                0x9ba54c6f,
+                                0xec3b9e9f,
+                                0x779ed2f0,
+                                0x3063b7f,
+                                0x98a37710,
+                                0xef3da5e0,
+                                0x7498e98f,
+                                0x60c76fe,
+                                0x9da93a91,
+                                0xea37e861,
+                                0x7192a40e,
+                                0x50a4d81,
+                                0x9eaf01ee,
+                                0xe931d31e,
+                                0x72949f71,
+                        },
 
-          {
-              0x0,
-              0xc18edfc,
-              0x1831dbf8,
-              0x14293604,
-              0x3063b7f0,
-              0x3c7b5a0c,
-              0x28526c08,
-              0x244a81f4,
-              0x60c76fe0,
-              0x6cdf821c,
-              0x78f6b418,
-              0x74ee59e4,
-              0x50a4d810,
-              0x5cbc35ec,
-              0x489503e8,
-              0x448dee14,
-          },
+                        {
+                                0x0,
+                                0xc18edfc,
+                                0x1831dbf8,
+                                0x14293604,
+                                0x3063b7f0,
+                                0x3c7b5a0c,
+                                0x28526c08,
+                                0x244a81f4,
+                                0x60c76fe0,
+                                0x6cdf821c,
+                                0x78f6b418,
+                                0x74ee59e4,
+                                0x50a4d810,
+                                0x5cbc35ec,
+                                0x489503e8,
+                                0x448dee14,
+                        },
 
-          {
-              0x0,
-              0xc18edfc0,
-              0x586cb9c1,
-              0x99e26601,
-              0xb0d97382,
-              0x7157ac42,
-              0xe8b5ca43,
-              0x293b1583,
-              0xbac3e145,
-              0x7b4d3e85,
-              0xe2af5884,
-              0x23218744,
-              0xa1a92c7,
-              0xcb944d07,
-              0x52762b06,
-              0x93f8f4c6,
-          },
+                        {
+                                0x0,
+                                0xc18edfc0,
+                                0x586cb9c1,
+                                0x99e26601,
+                                0xb0d97382,
+                                0x7157ac42,
+                                0xe8b5ca43,
+                                0x293b1583,
+                                0xbac3e145,
+                                0x7b4d3e85,
+                                0xe2af5884,
+                                0x23218744,
+                                0xa1a92c7,
+                                0xcb944d07,
+                                0x52762b06,
+                                0x93f8f4c6,
+                        },
 
-          {
-              0x0,
-              0xaef6c4cb,
-              0x869c8fd7,
-              0x286a4b1c,
-              0xd64819ef,
-              0x78bedd24,
-              0x50d49638,
-              0xfe2252f3,
-              0x77e1359f,
-              0xd917f154,
-              0xf17dba48,
-              0x5f8b7e83,
-              0xa1a92c70,
-              0xf5fe8bb,
-              0x2735a3a7,
-              0x89c3676c,
-          },
+                        {
+                                0x0,
+                                0xaef6c4cb,
+                                0x869c8fd7,
+                                0x286a4b1c,
+                                0xd64819ef,
+                                0x78bedd24,
+                                0x50d49638,
+                                0xfe2252f3,
+                                0x77e1359f,
+                                0xd917f154,
+                                0xf17dba48,
+                                0x5f8b7e83,
+                                0xa1a92c70,
+                                0xf5fe8bb,
+                                0x2735a3a7,
+                                0x89c3676c,
+                        },
 
-          {
-              0x0,
-              0xefc26b3e,
-              0x4f5d03d,
-              0xeb37bb03,
-              0x9eba07a,
-              0xe629cb44,
-              0xd1e7047,
-              0xe2dc1b79,
-              0x13d740f4,
-              0xfc152bca,
-              0x172290c9,
-              0xf8e0fbf7,
-              0x1a3ce08e,
-              0xf5fe8bb0,
-              0x1ec930b3,
-              0xf10b5b8d,
-          },
+                        {
+                                0x0,
+                                0xefc26b3e,
+                                0x4f5d03d,
+                                0xeb37bb03,
+                                0x9eba07a,
+                                0xe629cb44,
+                                0xd1e7047,
+                                0xe2dc1b79,
+                                0x13d740f4,
+                                0xfc152bca,
+                                0x172290c9,
+                                0xf8e0fbf7,
+                                0x1a3ce08e,
+                                0xf5fe8bb0,
+                                0x1ec930b3,
+                                0xf10b5b8d,
+                        },
 
-          {
-              0x0,
-              0x27ae81e8,
-              0x4f5d03d0,
-              0x68f38238,
-              0x9eba07a0,
-              0xb9148648,
-              0xd1e70470,
-              0xf6498598,
-              0xe6050901,
-              0xc1ab88e9,
-              0xa9580ad1,
-              0x8ef68b39,
-              0x78bf0ea1,
-              0x5f118f49,
-              0x37e20d71,
-              0x104c8c99,
-          },
+                        {
+                                0x0,
+                                0x27ae81e8,
+                                0x4f5d03d0,
+                                0x68f38238,
+                                0x9eba07a0,
+                                0xb9148648,
+                                0xd1e70470,
+                                0xf6498598,
+                                0xe6050901,
+                                0xc1ab88e9,
+                                0xa9580ad1,
+                                0x8ef68b39,
+                                0x78bf0ea1,
+                                0x5f118f49,
+                                0x37e20d71,
+                                0x104c8c99,
+                        },
 
-          {
-              0x0,
-              0x177b1443,
-              0x2ef62886,
-              0x398d3cc5,
-              0x5dec510c,
-              0x4a97454f,
-              0x731a798a,
-              0x64616dc9,
-              0xbbd8a218,
-              0xaca3b65b,
-              0x952e8a9e,
-              0x82559edd,
-              0xe634f314,
-              0xf14fe757,
-              0xc8c2db92,
-              0xdfb9cfd1,
-          },
+                        {
+                                0x0,
+                                0x177b1443,
+                                0x2ef62886,
+                                0x398d3cc5,
+                                0x5dec510c,
+                                0x4a97454f,
+                                0x731a798a,
+                                0x64616dc9,
+                                0xbbd8a218,
+                                0xaca3b65b,
+                                0x952e8a9e,
+                                0x82559edd,
+                                0xe634f314,
+                                0xf14fe757,
+                                0xc8c2db92,
+                                0xdfb9cfd1,
+                        },
 
-          {
-              0x0,
-              0xacc04271,
-              0x82f182a3,
-              0x2e31c0d2,
-              0xde920307,
-              0x72524176,
-              0x5c6381a4,
-              0xf0a3c3d5,
-              0x6655004f,
-              0xca95423e,
-              0xe4a482ec,
-              0x4864c09d,
-              0xb8c70348,
-              0x14074139,
-              0x3a3681eb,
-              0x96f6c39a,
-          },
+                        {
+                                0x0,
+                                0xacc04271,
+                                0x82f182a3,
+                                0x2e31c0d2,
+                                0xde920307,
+                                0x72524176,
+                                0x5c6381a4,
+                                0xf0a3c3d5,
+                                0x6655004f,
+                                0xca95423e,
+                                0xe4a482ec,
+                                0x4864c09d,
+                                0xb8c70348,
+                                0x14074139,
+                                0x3a3681eb,
+                                0x96f6c39a,
+                        },
 
-          {
-              0x0,
-              0xccaa009e,
-              0x4225077d,
-              0x8e8f07e3,
-              0x844a0efa,
-              0x48e00e64,
-              0xc66f0987,
-              0xac50919,
-              0xd3e51bb5,
-              0x1f4f1b2b,
-              0x91c01cc8,
-              0x5d6a1c56,
-              0x57af154f,
-              0x9b0515d1,
-              0x158a1232,
-              0xd92012ac,
-          },
+                        {
+                                0x0,
+                                0xccaa009e,
+                                0x4225077d,
+                                0x8e8f07e3,
+                                0x844a0efa,
+                                0x48e00e64,
+                                0xc66f0987,
+                                0xac50919,
+                                0xd3e51bb5,
+                                0x1f4f1b2b,
+                                0x91c01cc8,
+                                0x5d6a1c56,
+                                0x57af154f,
+                                0x9b0515d1,
+                                0x158a1232,
+                                0xd92012ac,
+                        },
 
-          {
-              0x0,
-              0x7cbb312b,
-              0xf9766256,
-              0x85cd537d,
-              0x299dc2ed,
-              0x5526f3c6,
-              0xd0eba0bb,
-              0xac509190,
-              0x533b85da,
-              0x2f80b4f1,
-              0xaa4de78c,
-              0xd6f6d6a7,
-              0x7aa64737,
-              0x61d761c,
-              0x83d02561,
-              0xff6b144a,
-          },
+                        {
+                                0x0,
+                                0x7cbb312b,
+                                0xf9766256,
+                                0x85cd537d,
+                                0x299dc2ed,
+                                0x5526f3c6,
+                                0xd0eba0bb,
+                                0xac509190,
+                                0x533b85da,
+                                0x2f80b4f1,
+                                0xaa4de78c,
+                                0xd6f6d6a7,
+                                0x7aa64737,
+                                0x61d761c,
+                                0x83d02561,
+                                0xff6b144a,
+                        },
 
-          {
-              0x0,
-              0xa6770bb4,
-              0x979f1129,
-              0x31e81a9d,
-              0xf44f2413,
-              0x52382fa7,
-              0x63d0353a,
-              0xc5a73e8e,
-              0x33ef4e67,
-              0x959845d3,
-              0xa4705f4e,
-              0x20754fa,
-              0xc7a06a74,
-              0x61d761c0,
-              0x503f7b5d,
-              0xf64870e9,
-          },
+                        {
+                                0x0,
+                                0xa6770bb4,
+                                0x979f1129,
+                                0x31e81a9d,
+                                0xf44f2413,
+                                0x52382fa7,
+                                0x63d0353a,
+                                0xc5a73e8e,
+                                0x33ef4e67,
+                                0x959845d3,
+                                0xa4705f4e,
+                                0x20754fa,
+                                0xc7a06a74,
+                                0x61d761c0,
+                                0x503f7b5d,
+                                0xf64870e9,
+                        },
 
-          {
-              0x0,
-              0x67de9cce,
-              0xcfbd399c,
-              0xa863a552,
-              0x440b7579,
-              0x23d5e9b7,
-              0x8bb64ce5,
-              0xec68d02b,
-              0x8816eaf2,
-              0xefc8763c,
-              0x47abd36e,
-              0x20754fa0,
-              0xcc1d9f8b,
-              0xabc30345,
-              0x3a0a617,
-              0x647e3ad9,
-          },
+                        {
+                                0x0,
+                                0x67de9cce,
+                                0xcfbd399c,
+                                0xa863a552,
+                                0x440b7579,
+                                0x23d5e9b7,
+                                0x8bb64ce5,
+                                0xec68d02b,
+                                0x8816eaf2,
+                                0xefc8763c,
+                                0x47abd36e,
+                                0x20754fa0,
+                                0xcc1d9f8b,
+                                0xabc30345,
+                                0x3a0a617,
+                                0x647e3ad9,
+                        },
 
-          {
-              0x0,
-              0xcb5cd3a5,
-              0x4dc8a10b,
-              0x869472ae,
-              0x9b914216,
-              0x50cd91b3,
-              0xd659e31d,
-              0x1d0530b8,
-              0xec53826d,
-              0x270f51c8,
-              0xa19b2366,
-              0x6ac7f0c3,
-              0x77c2c07b,
-              0xbc9e13de,
-              0x3a0a6170,
-              0xf156b2d5,
-          },
+                        {
+                                0x0,
+                                0xcb5cd3a5,
+                                0x4dc8a10b,
+                                0x869472ae,
+                                0x9b914216,
+                                0x50cd91b3,
+                                0xd659e31d,
+                                0x1d0530b8,
+                                0xec53826d,
+                                0x270f51c8,
+                                0xa19b2366,
+                                0x6ac7f0c3,
+                                0x77c2c07b,
+                                0xbc9e13de,
+                                0x3a0a6170,
+                                0xf156b2d5,
+                        },
 
-          {
-              0x0,
-              0x3d6029b,
-              0x7ac0536,
-              0x47a07ad,
-              0xf580a6c,
-              0xc8e08f7,
-              0x8f40f5a,
-              0xb220dc1,
-              0x1eb014d8,
-              0x1d661643,
-              0x191c11ee,
-              0x1aca1375,
-              0x11e81eb4,
-              0x123e1c2f,
-              0x16441b82,
-              0x15921919,
-          },
+                        {
+                                0x0,
+                                0x3d6029b,
+                                0x7ac0536,
+                                0x47a07ad,
+                                0xf580a6c,
+                                0xc8e08f7,
+                                0x8f40f5a,
+                                0xb220dc1,
+                                0x1eb014d8,
+                                0x1d661643,
+                                0x191c11ee,
+                                0x1aca1375,
+                                0x11e81eb4,
+                                0x123e1c2f,
+                                0x16441b82,
+                                0x15921919,
+                        },
 
-          {
-              0x0,
-              0x3d6029b0,
-              0x7ac05360,
-              0x47a07ad0,
-              0xf580a6c0,
-              0xc8e08f70,
-              0x8f40f5a0,
-              0xb220dc10,
-              0x30704bc1,
-              0xd106271,
-              0x4ab018a1,
-              0x77d03111,
-              0xc5f0ed01,
-              0xf890c4b1,
-              0xbf30be61,
-              0x825097d1,
-          },
+                        {
+                                0x0,
+                                0x3d6029b0,
+                                0x7ac05360,
+                                0x47a07ad0,
+                                0xf580a6c0,
+                                0xc8e08f70,
+                                0x8f40f5a0,
+                                0xb220dc10,
+                                0x30704bc1,
+                                0xd106271,
+                                0x4ab018a1,
+                                0x77d03111,
+                                0xc5f0ed01,
+                                0xf890c4b1,
+                                0xbf30be61,
+                                0x825097d1,
+                        },
 
-          {
-              0x0,
-              0x60e09782,
-              0xc1c12f04,
-              0xa121b886,
-              0x58f35849,
-              0x3813cfcb,
-              0x9932774d,
-              0xf9d2e0cf,
-              0xb1e6b092,
-              0xd1062710,
-              0x70279f96,
-              0x10c70814,
-              0xe915e8db,
-              0x89f57f59,
-              0x28d4c7df,
-              0x4834505d,
-          },
+                        {
+                                0x0,
+                                0x60e09782,
+                                0xc1c12f04,
+                                0xa121b886,
+                                0x58f35849,
+                                0x3813cfcb,
+                                0x9932774d,
+                                0xf9d2e0cf,
+                                0xb1e6b092,
+                                0xd1062710,
+                                0x70279f96,
+                                0x10c70814,
+                                0xe915e8db,
+                                0x89f57f59,
+                                0x28d4c7df,
+                                0x4834505d,
+                        },
 
-          {
-              0x0,
-              0xb8bc6765,
-              0xaa09c88b,
-              0x12b5afee,
-              0x8f629757,
-              0x37def032,
-              0x256b5fdc,
-              0x9dd738b9,
-              0xc5b428ef,
-              0x7d084f8a,
-              0x6fbde064,
-              0xd7018701,
-              0x4ad6bfb8,
-              0xf26ad8dd,
-              0xe0df7733,
-              0x58631056,
-          },
+                        {
+                                0x0,
+                                0xb8bc6765,
+                                0xaa09c88b,
+                                0x12b5afee,
+                                0x8f629757,
+                                0x37def032,
+                                0x256b5fdc,
+                                0x9dd738b9,
+                                0xc5b428ef,
+                                0x7d084f8a,
+                                0x6fbde064,
+                                0xd7018701,
+                                0x4ad6bfb8,
+                                0xf26ad8dd,
+                                0xe0df7733,
+                                0x58631056,
+                        },
 
-          {
-              0x0,
-              0x5019579f,
-              0xa032af3e,
-              0xf02bf8a1,
-              0x9b14583d,
-              0xcb0d0fa2,
-              0x3b26f703,
-              0x6b3fa09c,
-              0xed59b63b,
-              0xbd40e1a4,
-              0x4d6b1905,
-              0x1d724e9a,
-              0x764dee06,
-              0x2654b999,
-              0xd67f4138,
-              0x866616a7,
-          },
+                        {
+                                0x0,
+                                0x5019579f,
+                                0xa032af3e,
+                                0xf02bf8a1,
+                                0x9b14583d,
+                                0xcb0d0fa2,
+                                0x3b26f703,
+                                0x6b3fa09c,
+                                0xed59b63b,
+                                0xbd40e1a4,
+                                0x4d6b1905,
+                                0x1d724e9a,
+                                0x764dee06,
+                                0x2654b999,
+                                0xd67f4138,
+                                0x866616a7,
+                        },
 
-          {
-              0x0,
-              0x1c26a37,
-              0x384d46e,
-              0x246be59,
-              0x709a8dc,
-              0x6cbc2eb,
-              0x48d7cb2,
-              0x54f1685,
-              0xe1351b8,
-              0xfd13b8f,
-              0xd9785d6,
-              0xc55efe1,
-              0x91af964,
-              0x8d89353,
-              0xa9e2d0a,
-              0xb5c473d,
-          },
+                        {
+                                0x0,
+                                0x1c26a37,
+                                0x384d46e,
+                                0x246be59,
+                                0x709a8dc,
+                                0x6cbc2eb,
+                                0x48d7cb2,
+                                0x54f1685,
+                                0xe1351b8,
+                                0xfd13b8f,
+                                0xd9785d6,
+                                0xc55efe1,
+                                0x91af964,
+                                0x8d89353,
+                                0xa9e2d0a,
+                                0xb5c473d,
+                        },
 
-          {
-              0x0,
-              0x1c26a370,
-              0x384d46e0,
-              0x246be590,
-              0x709a8dc0,
-              0x6cbc2eb0,
-              0x48d7cb20,
-              0x54f16850,
-              0xe1351b80,
-              0xfd13b8f0,
-              0xd9785d60,
-              0xc55efe10,
-              0x91af9640,
-              0x8d893530,
-              0xa9e2d0a0,
-              0xb5c473d0,
-          },
+                        {
+                                0x0,
+                                0x1c26a370,
+                                0x384d46e0,
+                                0x246be590,
+                                0x709a8dc0,
+                                0x6cbc2eb0,
+                                0x48d7cb20,
+                                0x54f16850,
+                                0xe1351b80,
+                                0xfd13b8f0,
+                                0xd9785d60,
+                                0xc55efe10,
+                                0x91af9640,
+                                0x8d893530,
+                                0xa9e2d0a0,
+                                0xb5c473d0,
+                        },
 
-          {
-              0x0,
-              0x191b3141,
-              0x32366282,
-              0x2b2d53c3,
-              0x646cc504,
-              0x7d77f445,
-              0x565aa786,
-              0x4f4196c7,
-              0xc8d98a08,
-              0xd1c2bb49,
-              0xfaefe88a,
-              0xe3f4d9cb,
-              0xacb54f0c,
-              0xb5ae7e4d,
-              0x9e832d8e,
-              0x87981ccf,
-          },
+                        {
+                                0x0,
+                                0x191b3141,
+                                0x32366282,
+                                0x2b2d53c3,
+                                0x646cc504,
+                                0x7d77f445,
+                                0x565aa786,
+                                0x4f4196c7,
+                                0xc8d98a08,
+                                0xd1c2bb49,
+                                0xfaefe88a,
+                                0xe3f4d9cb,
+                                0xacb54f0c,
+                                0xb5ae7e4d,
+                                0x9e832d8e,
+                                0x87981ccf,
+                        },
 
-          {
-              0x0,
-              0x4ac21251,
-              0x958424a2,
-              0xdf4636f3,
-              0xf0794f05,
-              0xbabb5d54,
-              0x65fd6ba7,
-              0x2f3f79f6,
-              0x3b83984b,
-              0x71418a1a,
-              0xae07bce9,
-              0xe4c5aeb8,
-              0xcbfad74e,
-              0x8138c51f,
-              0x5e7ef3ec,
-              0x14bce1bd,
-          },
+                        {
+                                0x0,
+                                0x4ac21251,
+                                0x958424a2,
+                                0xdf4636f3,
+                                0xf0794f05,
+                                0xbabb5d54,
+                                0x65fd6ba7,
+                                0x2f3f79f6,
+                                0x3b83984b,
+                                0x71418a1a,
+                                0xae07bce9,
+                                0xe4c5aeb8,
+                                0xcbfad74e,
+                                0x8138c51f,
+                                0x5e7ef3ec,
+                                0x14bce1bd,
+                        },
 
-          {
-              0x0,
-              0x77073096,
-              0xee0e612c,
-              0x990951ba,
-              0x76dc419,
-              0x706af48f,
-              0xe963a535,
-              0x9e6495a3,
-              0xedb8832,
-              0x79dcb8a4,
-              0xe0d5e91e,
-              0x97d2d988,
-              0x9b64c2b,
-              0x7eb17cbd,
-              0xe7b82d07,
-              0x90bf1d91,
-          },
+                        {
+                                0x0,
+                                0x77073096,
+                                0xee0e612c,
+                                0x990951ba,
+                                0x76dc419,
+                                0x706af48f,
+                                0xe963a535,
+                                0x9e6495a3,
+                                0xedb8832,
+                                0x79dcb8a4,
+                                0xe0d5e91e,
+                                0x97d2d988,
+                                0x9b64c2b,
+                                0x7eb17cbd,
+                                0xe7b82d07,
+                                0x90bf1d91,
+                        },
 
-          {
-              0x0,
-              0x1db71064,
-              0x3b6e20c8,
-              0x26d930ac,
-              0x76dc4190,
-              0x6b6b51f4,
-              0x4db26158,
-              0x5005713c,
-              0xedb88320,
-              0xf00f9344,
-              0xd6d6a3e8,
-              0xcb61b38c,
-              0x9b64c2b0,
-              0x86d3d2d4,
-              0xa00ae278,
-              0xbdbdf21c,
-          },
-      };
+                        {
+                                0x0,
+                                0x1db71064,
+                                0x3b6e20c8,
+                                0x26d930ac,
+                                0x76dc4190,
+                                0x6b6b51f4,
+                                0x4db26158,
+                                0x5005713c,
+                                0xedb88320,
+                                0xf00f9344,
+                                0xd6d6a3e8,
+                                0xcb61b38c,
+                                0x9b64c2b0,
+                                0x86d3d2d4,
+                                0xa00ae278,
+                                0xbdbdf21c,
+                        },
+                };
 
       const int num_nibbles_parallel = 64;
 
-      const int num_sections = accessor_isz / (num_nibbles_parallel /
-                                               2);  // how many loop iterations
+      const int num_sections = accessor_isz / (num_nibbles_parallel /2);  // how many loop iterations 循环次数
       unsigned int result = ~0;
 
       for (int i = 0; i < num_sections; i++) {
@@ -1954,13 +1963,9 @@ void SubmitGzipTasksSingleEngine(
 // total update for the crc is the xor of the updates from the nibbles
         #pragma unroll
         for (int nib = 0; nib < num_nibbles_parallel; nib++) {
-          unsigned char this_input_nibble =
-              (acc_pibuf[(i * num_nibbles_parallel + nib) / 2] >>
-               (4 * (nib % 2)));
-          unsigned char this_result_nibble =
-              (nib < 8) ? (result >> (4 * nib)) : 0;
-          unsigned char this_table_index =
-              this_input_nibble ^ this_result_nibble;
+          unsigned char this_input_nibble =(acc_pibuf[(i * num_nibbles_parallel + nib) / 2] >>(4 * (nib % 2)));
+          unsigned char this_result_nibble =(nib < 8) ? (result >> (4 * nib)) : 0;
+          unsigned char this_table_index =this_input_nibble ^ this_result_nibble;
           if (nib % 2) {
             result_update_odd ^= table64[nib][this_table_index & 0xf];
           } else {
@@ -1974,23 +1979,22 @@ void SubmitGzipTasksSingleEngine(
     });
   });
 
+ //1.LZ77算法
   e_lz = q.submit([&](handler &h) {
-    auto accessor_isz = block_size;
-    auto acc_pibuf = pibuf->get_access<access::mode::read>(h);
+    auto accessor_isz = block_size;//压缩文件大小
+    auto acc_pibuf = pibuf->get_access<access::mode::read>(h);//压缩文件
 
     h.single_task<LZReduction<engineID>>([=]() [[intel::kernel_args_restrict]] {
       //-------------------------------------
       //   Hash Table(s)
       //-------------------------------------
 
-      [[intel::singlepump]] [[intel::numbanks(kVec)]] [
-          [intel::max_replicates(kVec)]] struct {
+      [[intel::singlepump]] [[intel::numbanks(kVec)]] [[intel::max_replicates(kVec)]] struct {
         unsigned char s[kLen];
       } dictionary[kDepth][kVec];
 
-      [[intel::singlepump]] [[intel::numbanks(kVec)]] [
-          [intel::max_replicates(
-              kVec)]] unsigned int dict_offset[kDepth][kVec];
+      //
+      [[intel::singlepump]] [[intel::numbanks(kVec)]] [[intel::max_replicates(kVec)]] unsigned int dict_offset[kDepth][kVec];
 
       // Initialize history to empty.
       for (int i = 0; i < kDepth; i++) {
@@ -2019,7 +2023,7 @@ void SubmitGzipTasksSingleEngine(
       // this is ceiling of (insize-kVec)/16, original comparison was
       // inpos < insize, now inpos is carried as (inpos-kVec)/16 so this is what
       // we compare to
-      unsigned int insize_compare = (accessor_isz) / kVec;
+      unsigned int insize_compare = (accessor_isz) / kVec; //压缩文件大小/16
 
       int ctr = insize_compare - 1;
 
@@ -2031,7 +2035,9 @@ void SubmitGzipTasksSingleEngine(
 
       // load in new data
       struct LzInput in;
-      Unroller<0, kVec>::step([&](int i) { in.data[i] = acc_pibuf[inpos++]; });
+      Unroller<0, kVec>::step([&](int i) {
+          in.data[i] = acc_pibuf[inpos++];
+      });
       Unroller<0, kVec>::step([&](int i) {
         current_window[i + kVec] = in.data[i];
       });
@@ -2042,15 +2048,18 @@ void SubmitGzipTasksSingleEngine(
         //-----------------------------
 
         // shift current window
-        Unroller<0, kVec>::step(
-            [&](int i) { current_window[i] = current_window[i + kVec]; });
+        Unroller<0, kVec>::step([&](int i) {
+            current_window[i] = current_window[i + kVec];
+        });
 
         // load in new data
-        Unroller<0, kVec>::step(
-            [&](int i) { in.data[i] = acc_pibuf[inpos++]; });
+        Unroller<0, kVec>::step([&](int i) {
+            in.data[i] = acc_pibuf[inpos++];
+        });
 
-        Unroller<0, kVec>::step(
-            [&](int i) { current_window[kVec + i] = in.data[i]; });
+        Unroller<0, kVec>::step([&](int i) {
+            current_window[kVec + i] = in.data[i];
+        });
 
         //-----------------------------
         // Compute hash
@@ -2059,9 +2068,7 @@ void SubmitGzipTasksSingleEngine(
         unsigned short hash[kVec];
 
         Unroller<0, kVec>::step([&](int i) {
-          hash[i] = (current_window[i] ^ (current_window[i + 1] << 6) ^
-                     (current_window[i + 2] << 2) ^ current_window[i + 3]) &
-                    kHashMask;
+          hash[i] = (current_window[i] ^ (current_window[i + 1] << 6) ^(current_window[i + 2] << 2) ^ current_window[i + 3]) &kHashMask;
         });
 
         //-----------------------------
@@ -2103,10 +2110,8 @@ void SubmitGzipTasksSingleEngine(
 
         Unroller<0, kVec>::step([&](int i) {
           // loop over kVec different dictionaries and write one word to each
-          dict_offset[hash[i]][i] =
-              (inpos_minus_vec_div_16 << 4) |
-              i;  // inpos - kVec + 0, we know that inpos - kVec has 0 as the 4
-                  // lower bits so really just concatenate
+          dict_offset[hash[i]][i] =(inpos_minus_vec_div_16 << 4) |i;  // inpos - kVec + 0, we know that inpos - kVec has 0 as the 4
+         // lower bits so really just concatenate
         });
 
         //-----------------------------
@@ -2139,8 +2144,7 @@ void SubmitGzipTasksSingleEngine(
             // loop over each char in the current window
             // and corresponding char in comparison window
             Unroller<0, kLen>::step([&](int k) {
-              bool comp =
-                  current_window[k + j] == compare_window[k][i][j] && !done[j];
+              bool comp =current_window[k + j] == compare_window[k][i][j] && !done[j];
               length[j] += comp;
               done[j] = !comp;
             });
@@ -2148,29 +2152,17 @@ void SubmitGzipTasksSingleEngine(
 
           // Check if this the best length
           Unroller<0, kVec>::step([&](int m) {
-            bool update_best =
-                (length[m] > best_length[m]) && (compare_offset[i][m] != 0) &&
-                (((inpos_minus_vec_div_16 << kVecPow) | (i & (kVec - 1))) -
-                     (compare_offset[i][m]) <
-                 kMaxDistance);
+            bool update_best =(length[m] > best_length[m]) && (compare_offset[i][m] != 0) &&(((inpos_minus_vec_div_16 << kVecPow) | (i & (kVec - 1))) -(compare_offset[i][m]) <kMaxDistance);
 
-            unsigned int new_offset =
-                (((inpos_minus_vec_div_16 << kVecPow) | (m & (kVec - 1))) &
-                 0x7ffff) -
-                ((compare_offset[i][m] & 0x7ffff));
+            unsigned int new_offset =(((inpos_minus_vec_div_16 << kVecPow) | (m & (kVec - 1))) &0x7ffff) -((compare_offset[i][m] & 0x7ffff));
 
             // Reconsider if new_offset is bigger than current offset, might
             // take more bytes to encode
-            update_best = update_best && (length[m] == best_length[m]) &&
-                                  (new_offset > best_offset[m])
-                              ? false
-                              : update_best;
+            update_best = update_best && (length[m] == best_length[m]) && (new_offset > best_offset[m])? false: update_best;
 
-            best_offset[m] = (update_best ? new_offset : best_offset[m]) &
-                             0x7ffff;  // 19 bits is sufficient
+            best_offset[m] = (update_best ? new_offset : best_offset[m]) &0x7ffff;  // 19 bits is sufficient
 
-            best_length[m] = (update_best ? length[m] : best_length[m]) &
-                             0x1f;  // 5 bits is sufficient
+            best_length[m] = (update_best ? length[m] : best_length[m]) &0x1f;  // 5 bits is sufficient
           });
         });
 
@@ -2182,19 +2174,11 @@ void SubmitGzipTasksSingleEngine(
         // self-matching or didn't match and keep only the matches that, when
         // encoded, take fewer bytes than the actual match length
         Unroller<0, kVec>::step([&](int i) {
-          best_length[i] = (((best_length[i] & 0x1f) >= 3) &&
-                                    ((best_offset[i]) < kMaxDistance)
-                                ? best_length[i]
-                                : 0) &
-                           0x1f;  // 5 bits is sufficient
+          best_length[i] = (((best_length[i] & 0x1f) >= 3) &&((best_offset[i]) < kMaxDistance) ? best_length[i] : 0) &0x1f;  // 5 bits is sufficient
 
           // Second level filter - remove matches with len 3, greater than
           // kTooFar
-          best_length[i] =
-              (((best_length[i] & 0x1f) == 3) && ((best_offset[i]) > kTooFar)
-                   ? 0
-                   : best_length[i]) &
-              0x1f;  // 5 bits is sufficient
+          best_length[i] =(((best_length[i] & 0x1f) == 3) && ((best_offset[i]) > kTooFar)? 0: best_length[i]) & 0x1f;  // 5 bits is sufficient
                      // don't emmit matches for last iteration as some of the
                      // second part of the window might be undefined
           if (ctr == 0) best_length[i] = 0;
@@ -2215,29 +2199,23 @@ void SubmitGzipTasksSingleEngine(
             unsigned int len = best_length[i];
 
             // Skip to the next match
-            next_match_search =
-                i >= next_match_search && len > 0 ? i + len : next_match_search;
+            next_match_search =i >= next_match_search && len > 0 ? i + len : next_match_search;
           });
 
-          first_valid_pos_speculative[guess] =
-              next_match_search - kVec > 0 ? next_match_search - kVec : 0;
+          first_valid_pos_speculative[guess] =next_match_search - kVec > 0 ? next_match_search - kVec : 0;
         });
 
         // For kVec=16 (the largest currently supported), this should be a 16:1
         // mux, which is 2 6LUTs deep.  For larger kVec, it will be worse.
         unsigned char current_valid_pos = first_valid_pos;
-        first_valid_pos =
-            first_valid_pos_speculative[first_valid_pos & (kVec - 1)] &
-            (kVec -
-             1);  // first_valid_pos only needs 4 bits, make this explicit
+        first_valid_pos =first_valid_pos_speculative[first_valid_pos & (kVec - 1)] &(kVec - 1);  // first_valid_pos only needs 4 bits, make this explicit
 
         // greedy match selection
         Unroller<0, (kVec)>::step([&](int i) {
           unsigned int len = best_length[i];
           best_length[i] = i < current_valid_pos ? -1 : best_length[i];
           // Skip to the next match
-          current_valid_pos =
-              i >= current_valid_pos && len > 0 ? i + len : current_valid_pos;
+          current_valid_pos =i >= current_valid_pos && len > 0 ? i + len : current_valid_pos;
         });
 
         //-----------------------------
@@ -2272,8 +2250,7 @@ void SubmitGzipTasksSingleEngine(
       });
 
       Unroller<0, kVec>::step([&](unsigned char i) {
-        bool pred =
-            ((i - firstpos) < (lasti - firstpos)) && ((i - firstpos) >= 0);
+        bool pred =((i - firstpos) < (lasti - firstpos)) && ((i - firstpos) >= 0);
         dist_offs_data.data[i] = pred ? current_window[i + kVec] : 0;
         dist_offs_data.len[i] = pred ? 0 : -1;
       });
@@ -2281,15 +2258,13 @@ void SubmitGzipTasksSingleEngine(
       acc_dist_channel_last::write(dist_offs_data);
     });
   });
-
+  //霍夫曼算法
   e_huff = q.submit([&](handler &h) {
     auto accessor_isz = block_size;
-    auto acc_gzip_out =
-        gzip_out_buf->get_access<access::mode::discard_write>(h);
+    auto acc_gzip_out =gzip_out_buf->get_access<access::mode::discard_write>(h);
     auto accessor_output = pobuf->get_access<access::mode::discard_write>(h);
     auto acc_eof = last_block ? 1 : 0;
-    h.single_task<StaticHuffman<engineID>>([=
-    ]() [[intel::kernel_args_restrict]] {
+    h.single_task<StaticHuffman<engineID>>([=]() [[intel::kernel_args_restrict]] {
       unsigned int leftover[kVec] = {0};
       Unroller<0, kVec>::step([&](int i) { leftover[i] = 0; });
 
@@ -2316,21 +2291,15 @@ void SubmitGzipTasksSingleEngine(
         in.len[0] = ctr == 1 ? -3 : -1;
         in.data[0] = 0;
 
-        in = ctr > 2 ? acc_dist_channel::read()
-                     : (ctr == 2 ? acc_dist_channel_last::read() : in);
+        in = ctr > 2 ? acc_dist_channel::read(): (ctr == 2 ? acc_dist_channel_last::read() : in);
 
         struct HuffmanOutput outdata;
-        outdata.write = HufEnc(in.len, in.dist, in.data, outdata.data, leftover,
-                               &leftover_size);
+        outdata.write = HufEnc(in.len, in.dist, in.data, outdata.data, leftover,&leftover_size);
 
         // prevent out of bounds write
         if (((ctr == 0) || outdata.write) && (odx < accessor_isz)) {
           Unroller<0, kVec * sizeof(unsigned int)>::step([&](int i) {
-            accessor_output[odx + i] =
-                (ctr == 0) ? (unsigned char)(leftover[(i >> 2) & 0xf] >>
-                                             ((i & 3) << 3))
-                           : (unsigned char)(outdata.data[(i >> 2) & 0xf] >>
-                                             ((i & 3) << 3));
+            accessor_output[odx + i] =(ctr == 0) ? (unsigned char)(leftover[(i >> 2) & 0xf] >>((i & 3) << 3)): (unsigned char)(outdata.data[(i >> 2) & 0xf] >>((i & 3) << 3));
           });
         }
 
@@ -2340,13 +2309,25 @@ void SubmitGzipTasksSingleEngine(
       } while (ctr--);
 
       // Store summary values from lz and huffman
-      acc_gzip_out[0].compression_sz =
-          (outpos_huffman * sizeof(unsigned int) * kVec) +
-          (leftover_size + 7) / 8;
+      acc_gzip_out[0].compression_sz =(outpos_huffman * sizeof(unsigned int) * kVec) +(leftover_size + 7) / 8;
     });
   });
 }
 
+/**
+ * 提交压缩任务
+ * @param q 设备queue
+ * @param block_size 要压缩文件大小
+ * @param pibuf  isz + kInOutPadding (block_size+256)
+ * @param pobuf
+ * @param gzip_out_buf
+ * @param result_crc
+ * @param last_block
+ * @param e_crc
+ * @param e_lz
+ * @param e_huff
+ * @param engineID
+ */
 void SubmitGzipTasks(queue &q,
                      size_t block_size,  // size of block to compress.
                      buffer<char, 1> *pibuf, buffer<char, 1> *pobuf,
@@ -2358,14 +2339,12 @@ void SubmitGzipTasks(queue &q,
   // But at run time, the host can dynamically select which engine(s) to use via
   // engineID.
   if (engineID == 0) {
-    SubmitGzipTasksSingleEngine<0>(q, block_size, pibuf, pobuf, gzip_out_buf,
-                                   result_crc, last_block, e_crc, e_lz, e_huff);
+    SubmitGzipTasksSingleEngine<0>(q, block_size, pibuf, pobuf, gzip_out_buf,result_crc, last_block, e_crc, e_lz, e_huff);
   }
 
   #if NUM_ENGINES > 1
     if (engineID == 1) {
-      SubmitGzipTasksSingleEngine<1>(q, block_size, pibuf, pobuf, gzip_out_buf,
-                                     result_crc, last_block, e_crc, e_lz, e_huff);
+      SubmitGzipTasksSingleEngine<1>(q, block_size, pibuf, pobuf, gzip_out_buf,result_crc, last_block, e_crc, e_lz, e_huff);
     }
   #endif
 
