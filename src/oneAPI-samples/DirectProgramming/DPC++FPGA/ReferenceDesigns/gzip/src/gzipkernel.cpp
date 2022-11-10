@@ -24,6 +24,12 @@ struct Unroller<End, End> {
   static void step(const Action &action) {}
 };
 
+/*static_ltree[] 静态Huffman编码时，用来对没有改动的字节和匹配长度进行编码的树。
+static_dtree[] 静态Huffman编码时，用来对相隔距离进行编码的树。
+dyn_ltree[] 动态Huffman编码时，用来对没有改动的字节和匹配长度进行编码的树。
+dyn_dtree[] 动态Huffman编码时，用来对相隔距离进行编码的树。
+bl_tree[] 动态Huffman编码时，用来对解压缩时用来产生dyn_ltree[]和dyn_dtree[]的信息进行编码的树。*/
+
 int GetHuffLiteralBits(unsigned char ch) {
   CtData static_ltree[kLCodes + 2] = {
       {12, 8},  {140, 8}, {76, 8},  {204, 8}, {44, 8},  {172, 8}, {108, 8},
@@ -656,16 +662,16 @@ bool HufEnc(char *len, short *dist, unsigned char *data, unsigned int *outdata,u
     unsigned int temp2 = temp >> 32ULL;
 
     //TODO 貌似无用
-//    if (IsValid(len[i], dist[i], data[i])) {
-//      code[i].x = temp1;
-//      code[i].y = temp2;
-//    } else {
-//      code[i].x = temp1;
-//      code[i].y = temp2;
-//    }
-
+    if (IsValid(len[i], dist[i], data[i])) {
       code[i].x = temp1;
       code[i].y = temp2;
+    } else {
+      code[i].x = temp1;
+      code[i].y = temp2;
+    }
+
+     /* code[i].x = temp1;
+      code[i].y = temp2;*/
 
   });
 
@@ -1998,15 +2004,19 @@ void SubmitGzipTasksSingleEngine(
 
       // Initialize history to empty.
       for (int i = 0; i < kDepth; i++) {
-        Unroller<0, kVec>::step([&](int k) { dict_offset[i][k] = 0; });
+        Unroller<0, kVec>::step([&](int k) {
+            dict_offset[i][k] = 0;
+        });
       }
 
       // This is the window of data on which we look for matches
       // We fetch twice our data size because we have kVec offsets
+      //滑动窗口 16+16 左侧字典区 右侧待编码区
       unsigned char current_window[kVecX2];
 
       // This is the window of data on which we look for matches
       // We fetch twice our data size because we have kVec offsets
+      //比较窗口
       unsigned char compare_window[kLen][kVec][kVec];
       // kVec bytes per dict----------|    |   |
       // kVec dictionaries-----------------|   |
@@ -2034,6 +2044,7 @@ void SubmitGzipTasksSingleEngine(
       size_t inpos = 0;
 
       // load in new data
+      //
       struct LzInput in;
       Unroller<0, kVec>::step([&](int i) {
           in.data[i] = acc_pibuf[inpos++];
@@ -2042,31 +2053,33 @@ void SubmitGzipTasksSingleEngine(
         current_window[i + kVec] = in.data[i];
       });
 
+      //开始编码
       do {
         //-----------------------------
         // Prepare current window
         //-----------------------------
 
         // shift current window
+        //移动窗口数据 每次移动长度:kVec
         Unroller<0, kVec>::step([&](int i) {
             current_window[i] = current_window[i + kVec];
         });
 
         // load in new data
+        //加载新数据
         Unroller<0, kVec>::step([&](int i) {
             in.data[i] = acc_pibuf[inpos++];
         });
 
+        //
         Unroller<0, kVec>::step([&](int i) {
             current_window[kVec + i] = in.data[i];
         });
 
         //-----------------------------
-        // Compute hash
+        // Compute hash 计算哈希 4长度
         //-----------------------------
-
         unsigned short hash[kVec];
-
         Unroller<0, kVec>::step([&](int i) {
           hash[i] = (current_window[i] ^ (current_window[i + 1] << 6) ^(current_window[i + 2] << 2) ^ current_window[i + 3]) &kHashMask;
         });
@@ -2076,6 +2089,8 @@ void SubmitGzipTasksSingleEngine(
         //-----------------------------
 
         // loop over kVec compare windows, each has a different hash
+        //16*16*16(4096)
+        //移动比较窗口
         Unroller<0, kVec>::step([&](int i) {
           // loop over all kVec bytes
           Unroller<0, kLen>::step([&](int j) {
@@ -2097,7 +2112,6 @@ void SubmitGzipTasksSingleEngine(
         //-----------------------------
         // Dictionary update
         //-----------------------------
-
         // loop over different dictionaries to store different frames
         // store one frame per dictionary
         // loop over kVec bytes to store
@@ -2110,6 +2124,7 @@ void SubmitGzipTasksSingleEngine(
 
         Unroller<0, kVec>::step([&](int i) {
           // loop over kVec different dictionaries and write one word to each
+          //记录文件中的索引 0-15 /16-31/32-47
           dict_offset[hash[i]][i] =(inpos_minus_vec_div_16 << 4) |i;  // inpos - kVec + 0, we know that inpos - kVec has 0 as the 4
          // lower bits so really just concatenate
         });
@@ -2179,8 +2194,8 @@ void SubmitGzipTasksSingleEngine(
           // Second level filter - remove matches with len 3, greater than
           // kTooFar
           best_length[i] =(((best_length[i] & 0x1f) == 3) && ((best_offset[i]) > kTooFar)? 0: best_length[i]) & 0x1f;  // 5 bits is sufficient
-                     // don't emmit matches for last iteration as some of the
-                     // second part of the window might be undefined
+         // don't emmit matches for last iteration as some of the
+         // second part of the window might be undefined
           if (ctr == 0) best_length[i] = 0;
         });
 
@@ -2276,6 +2291,7 @@ void SubmitGzipTasksSingleEngine(
       int odx = 0;
 
       // Add the gzip start block marker. Assumes static huffman trees.
+      //静态树？
       leftover_size = 3;
       leftover[0] = ((kStaticTrees << 1) + (acc_eof));
 
