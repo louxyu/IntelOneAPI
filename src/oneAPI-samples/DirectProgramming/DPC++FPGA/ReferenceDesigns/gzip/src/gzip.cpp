@@ -480,8 +480,7 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
   }
 
   if (report) {
-    double compression_ratio =
-        (double)((double)compressed_sz[0] / (double)isz / iterations);
+    double compression_ratio =((double)compressed_sz[0] / (double)isz / iterations);
 #ifndef FPGA_EMULATOR
     std::cout << "Throughput: " << kNumEngines * gbps << " GB/s\n\n";
     for (int eng = 0; eng < kNumEngines; eng++) {
