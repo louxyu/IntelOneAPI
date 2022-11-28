@@ -10,6 +10,8 @@
 // e.g., $ONEAPI_ROOT/dev-utilities//include/dpc_common.hpp
 #include "dpc_common.hpp"
 
+#include "my_selector.h"
+
 
 using namespace sycl;
 
@@ -62,11 +64,11 @@ event Consumer(queue &q, buffer<int, 1> &out_buf) {
         // read the input from the pipe
         int input = ProducerToConsumerPipe::read();
 
-        // do work on the input
-        int answer = ConsumerWork(input);
+          // do work on the input
+          int answer = ConsumerWork(input);
 
-        // write the result to the output buffer
-        out_accessor[i] = answer;
+          // write the result to the output buffer
+          out_accessor[i] = answer;
       }
     });
   });
@@ -104,6 +106,8 @@ int main(int argc, char *argv[]) {
 
 #if defined(FPGA_EMULATOR)
   ext::intel::fpga_emulator_selector device_selector;
+
+  //my_selector device_selector;
 #else
   ext::intel::fpga_selector device_selector;
 #endif

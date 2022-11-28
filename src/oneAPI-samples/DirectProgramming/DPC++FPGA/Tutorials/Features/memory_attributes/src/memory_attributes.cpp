@@ -141,6 +141,7 @@ event submitKernel<2>(queue& q, unsigned init, buffer<unsigned, 1>& d_buf,
     accessor d_accessor(d_buf, h, read_only);
     accessor r_accessor(r_buf, h, write_only, no_init);
 
+    //kernel_args_restrict忽略SYCL*内核中访问器参数之间的依赖关系
     h.single_task<Kernel<2>>([=]() [[intel::kernel_args_restrict]] {
       // Declare 'dict_offset' whose attributes are applied based on AttrType
       [[intel::doublepump,

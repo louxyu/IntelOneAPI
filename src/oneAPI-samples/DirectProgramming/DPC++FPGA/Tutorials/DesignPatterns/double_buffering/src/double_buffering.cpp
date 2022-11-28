@@ -52,9 +52,9 @@ class SimpleVpow;
    here (because we need to launch another kernel). So we only want this
    transfer to occur at the end of overall execution, not at the end of each
    individual kernel execution.
+   执行任务
 */
-void SimplePow(sycl::queue &q, buffer<float, 1> &buffer_a,
-               buffer<float, 1> &buffer_b, event &e) {
+void SimplePow(sycl::queue &q, buffer<float, 1> &buffer_a, buffer<float, 1> &buffer_b, event &e) {
   // Submit to the queue and execute the kernel
   e = q.submit([&](handler &h) {
     // Get kernel access to the buffers
@@ -96,14 +96,14 @@ void SimplePow(sycl::queue &q, buffer<float, 1> &buffer_a,
       another way, this allows ProcessOutput() to potentially perform more work
       in parallel with the runtime's copy operation.
     */
+    // 更新主机缓存 触发缓存对象在主机端的备份更新
     h.update_host(accessor_b);
   });
 }
 
 // Returns kernel execution time for a given SYCL event from a queue.
 ulong SyclGetExecTimeNs(event e) {
-  ulong start_time =
-      e.get_profiling_info<info::event_profiling::command_start>();
+  ulong start_time =  e.get_profiling_info<info::event_profiling::command_start>();
   ulong end_time = e.get_profiling_info<info::event_profiling::command_end>();
   return (end_time - start_time);
 }
@@ -121,6 +121,7 @@ float MyPow(float input, int pow) {
     Queries and records execution time of the kernel that just completed. This
    is a natural place to do this because ProcessOutput() is blocked on kernel
    completion.
+   模拟设备到主机?
 */
 void ProcessOutput(buffer<float, 1> &input_buf, buffer<float, 1> &output_buf,
                    int exec_number, event e,
@@ -142,8 +143,7 @@ void ProcessOutput(buffer<float, 1> &input_buf, buffer<float, 1> &output_buf,
       where you *could* do it. */
   for (int i = 0; i < kSize / 8; i++) {
     const double expected_value = MyPow(input_buf_acc[i], kPow);
-    const bool out_invalid = std::abs((output_buf_acc[i] - expected_value) /
-                                      expected_value) > epsilon;
+    const bool out_invalid = std::abs((output_buf_acc[i] - expected_value) / expected_value) > epsilon;
     if ((num_errors < num_errors_to_print) && out_invalid) {
       if (num_errors == 0) {
         pass = false;
@@ -171,6 +171,7 @@ void ProcessOutput(buffer<float, 1> &input_buf, buffer<float, 1> &output_buf,
    execution time. Writes the data into the associated SYCL buffer. The write
    will block until the previous kernel execution, that is using this buffer,
    completes.
+   模拟主机到设备?
 */
 void ProcessInput(buffer<float, 1> &buf) {
   // We are generating completely new input data, so can the no_init property
@@ -270,49 +271,38 @@ int main() {
       // for the first 2 kernel executions.
       dpc_common::TimeInterval exec_time;
 
-      if (i == 0) {  // Single buffering
+      if (i == 0) {  // Single buffering 单缓冲
         for (int i = 0; i < kTimes; i++) {
           // Only print every few iterations, just to limit the prints.
           if (i % 10 == 0) {
             std::cout << "Launching kernel #" << i << "\n";
           }
-
           ProcessInput(input_buf[0]);
           SimplePow(q, input_buf[0], output_buf[0], sycl_events[0]);
-          ProcessOutput(input_buf[0], output_buf[0], i, sycl_events[0],
-                        total_kernel_time_per_slot[0]);
+          ProcessOutput(input_buf[0], output_buf[0], i, sycl_events[0], total_kernel_time_per_slot[0]);
         }
-      } else {  // Double buffering
+      } else {
+          // Double buffering 双缓冲
         // Process input for first 2 kernel launches and queue them. Then block
         // on processing the output of the first kernel.
         ProcessInput(input_buf[0]);
         ProcessInput(input_buf[1]);
-
         std::cout << "Launching kernel #0\n";
-
         SimplePow(q, input_buf[0], output_buf[0], sycl_events[0]);
         for (int i = 1; i < kTimes; i++) {
           if (i % 10 == 0) {
             std::cout << "Launching kernel #" << i << "\n";
           }  // Only print every few iterations, just to limit the prints.
-
           // Launch the next kernel
           SimplePow(q, input_buf[i % 2], output_buf[i % 2], sycl_events[i % 2]);
-
           // Process output from previous kernel. This will block on kernel
           // completion.
-          ProcessOutput(input_buf[(i - 1) % 2], output_buf[(i - 1) % 2], i,
-                        sycl_events[(i - 1) % 2],
-                        total_kernel_time_per_slot[(i - 1) % 2]);
-
+          ProcessOutput(input_buf[(i - 1) % 2], output_buf[(i - 1) % 2], i,sycl_events[(i - 1) % 2],total_kernel_time_per_slot[(i - 1) % 2]);
           // Generate input for the next kernel.
           ProcessInput(input_buf[(i - 1) % 2]);
         }
-
         // Process output of the final kernel
-        ProcessOutput(input_buf[(kTimes - 1) % 2], output_buf[(kTimes - 1) % 2],
-                      i, sycl_events[(kTimes - 1) % 2],
-                      total_kernel_time_per_slot[(kTimes - 1) % 2]);
+        ProcessOutput(input_buf[(kTimes - 1) % 2], output_buf[(kTimes - 1) % 2],i, sycl_events[(kTimes - 1) % 2],total_kernel_time_per_slot[(kTimes - 1) % 2]);
       }
 
       // Add up the overall kernel execution time.

@@ -1,3 +1,4 @@
+#include <iostream>
 #include "crc32.hpp"
 
 // This table is CRC32s for all single byte values created by using the
@@ -74,17 +75,16 @@ unsigned int Crc32Host(
 {
   unsigned int curr_crc = ~previous_crc;
   if (sz) do {
-      curr_crc =
-          crc32_table[((int)curr_crc ^ (*pbuf++)) & 0xff] ^ (curr_crc >> 8);
+      curr_crc = crc32_table[((int)curr_crc ^ (*pbuf++)) & 0xff] ^ (curr_crc >> 8);
     } while (--sz);
   return curr_crc ^ 0xffffffffL;
 }
 
 unsigned int Crc32(const char *in, size_t buffer_sz,
                    unsigned int previous_crc) {
+    //std::cout << "previous_crc======>:"<<previous_crc<<"\n";
   const int num_nibbles_parallel = 64;
-  const int num_sections =
-      buffer_sz / (num_nibbles_parallel / 2);  // how many loop iterations
+  const int num_sections = buffer_sz / (num_nibbles_parallel / 2);  // how many loop iterations
   // now deal with the remainder, this should be done on the software host
   // the post-invert also happens inside crc_reference
   const char *remaining_data = &in[num_sections * (num_nibbles_parallel / 2)];

@@ -36,27 +36,31 @@ void VecAdd(const std::vector<float> &summands1,
 #endif
 
   try {
-    queue q(device_selector, dpc_common::exception_handler,
-            property::queue::enable_profiling{});
+    queue q(device_selector, dpc_common::exception_handler, property::queue::enable_profiling{});
 
     buffer buffer_summands1(summands1);
     buffer buffer_summands2(summands2);
     buffer buffer_sum(sum);
 
+    int N=1;
+    int *result=sycl::malloc_shared<int>(N,q);
+
     event e = q.submit([&](handler &h) {
       accessor acc_summands1(buffer_summands1, h, read_only);
       accessor acc_summands2(buffer_summands2, h, read_only);
       accessor acc_sum(buffer_sum, h, write_only, no_init);
-
-      h.single_task<VAdd<unroll_factor>>([=]()
-                                         [[intel::kernel_args_restrict]] {
+      h.single_task<VAdd<unroll_factor>>([=]() [[intel::kernel_args_restrict]] {
         // Unroll the loop fully or partially, depending on unroll_factor
         #pragma unroll unroll_factor
         for (size_t i = 0; i < array_size; i++) {
           acc_sum[i] = acc_summands1[i] + acc_summands2[i];
+            result[0]=i;
         }
       });
     });
+
+    e.wait();
+    std::cout<<"result>>>>:"<<result[0]<<std::endl;
 
     double start = e.get_profiling_info<info::event_profiling::command_start>();
     double end = e.get_profiling_info<info::event_profiling::command_end>();

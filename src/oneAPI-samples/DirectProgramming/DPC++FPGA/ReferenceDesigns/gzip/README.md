@@ -37,6 +37,15 @@ The High Bandwidth variant maximizes system throughput without regard for latenc
 The Low-Latency variant takes advantage of Universal Shared Memory (USM) to avoid these copy operations, allowing the GZIP engine to directly access input/output buffers in host-memory. This reduces latency, but throughput is also reduced. "Latency" in this context is defined as the duration of time between when the input buffer is available in host memory to when the output buffer (i.e., the compressed result) is available in host memory.
 The Low-Latency variant is only supported on Stratix® 10 SX.
 
+这个DPC++参考设计实现了一个压缩算法。该实现为FPGA器件进行了优化。压缩结果与GZIP兼容，可以用GUNZIP解压。GZIP输出文件格式与GZIP的DEFLATE算法兼容，并遵循固定的RFC 1951子集。更具体的参考资料请参见参考资料部分。
+
+该算法使用与GZIP兼容的Limpel-Ziv 77（LZ77）算法进行数据去重，并使用与GZIP兼容的Static Huffman算法进行比特减少。该实现包括三个FPGA加速任务（LZ77、静态赫夫曼和CRC）。
+
+该算法的FPGA实现使一个或两个独立的GZIP计算引擎在FPGA上并行运行。可用的FPGA资源限制了引擎的数量。默认情况下，当设计被编译为带有Intel Arria® 10 GX FPGA的Intel® PAC时，设计被参数化以创建一个引擎。当为英特尔®FPGA PAC D5005（配备英特尔Stratix® 10 SX）这一较大的设备进行编译时，将创建两个引擎。
+
+该参考设计包含两个变体。"高带宽 "和 "低延迟"。高带宽变体最大限度地提高了系统的吞吐量，而不考虑延时。它将输入/输出SYCL缓冲区转移到与FPGA相连的DDR上。然后，内核对这些缓冲区进行操作。低延迟变量利用通用共享内存（USM）的优势来避免这些复制操作，允许GZIP引擎直接访问主机内存中的输入/输出缓冲区。这减少了延迟，但吞吐量也会减少。这里的 "延迟 "是指从输入缓冲区在主机内存中可用到输出缓冲区（即压缩结果）在主机内存中可用的时间长度。低延迟变体仅在Stratix® 10 SX上支持。
+ 
+
 ## Key Implementation Details
 
  | Kernel                     | Description

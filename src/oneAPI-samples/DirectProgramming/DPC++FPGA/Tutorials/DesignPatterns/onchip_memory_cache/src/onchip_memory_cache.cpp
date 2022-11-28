@@ -63,8 +63,7 @@ void Histogram(sycl::queue &q, buffer<uint32_t>& input_buf,
 
         // Specify that the minimum dependence-distance of
         // loop carried variables is kCacheDepth.
-        [[intel::ivdep(kCacheDepth)]] for (uint32_t n = 0;
-                                               n < kInitNumInputs; ++n) {
+        [[intel::ivdep(kCacheDepth)]] for (uint32_t n = 0;n < kInitNumInputs; ++n) {
           // Compute the Histogram index to increment
           uint32_t b = input[n] % kNumOutputs;
 
@@ -121,8 +120,7 @@ int main() {
   ext::intel::fpga_selector device_selector;
 #endif
   try {
-    auto prop_list =
-        property_list{property::queue::enable_profiling()};
+    auto prop_list =property_list{property::queue::enable_profiling()};
 
     sycl::queue q(device_selector, dpc_common::exception_handler, prop_list);
 

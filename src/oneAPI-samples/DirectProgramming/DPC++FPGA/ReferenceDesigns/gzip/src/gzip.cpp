@@ -1,3 +1,8 @@
+/**
+ * 高宽带版本
+ * 高带宽变体最大限度地提高了系统的吞吐量，而不考虑延时。
+ * 它将输入/输出SYCL缓冲区转移到与FPGA相连的DDR上。然后，内核对这些缓冲区进行操作
+ */
 #include <CL/sycl.hpp>
 #include <sycl/ext/intel/fpga_extensions.hpp>
 #include <chrono>
@@ -13,7 +18,6 @@
 // dpc_common.hpp can be found in the dev-utilities include folder.
 // e.g., $ONEAPI_ROOT/dev-utilities//include/dpc_common.hpp
 #include "dpc_common.hpp"
-
 
 using namespace sycl;
 
@@ -53,8 +57,7 @@ bool FindGetArg(std::string &arg, const char *str, int defaultval, int *val) {
 
 constexpr int kMaxStringLen = 40;
 
-bool FindGetArgString(std::string &arg, const char *str, char *str_value,
-                      size_t maxchars) {
+bool FindGetArgString(std::string &arg, const char *str, char *str_value, size_t maxchars) {
   std::size_t found = arg.find(str, 0, strlen(str));
   if (found != std::string::npos) {
     const char *sptr = &arg.c_str()[strlen(str)];
@@ -130,15 +133,13 @@ int main(int argc, char *argv[]) {
     auto prop_list = property_list{property::queue::enable_profiling()};
     queue q(device_selector, dpc_common::exception_handler, prop_list);
 
-    std::cout << "Running on device:  "
-              << q.get_device().get_info<info::device::name>().c_str() << "\n";
+    std::cout << "Running on device:  " << q.get_device().get_info<info::device::name>().c_str() << "\n";
 
     if (infilename == "") {
       std::cout << "Must specify a filename to compress\n\n";
       Help();
       return 1;
     }
-
     // next, check valid and acceptable parameter ranges.
     // if output filename not set, use the default
     // name, else use the name specified by the user
@@ -238,7 +239,23 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
     std::cout << "Warning: Host allocations are not supported on this platform, which means that pre-pinning is not supported. DMA transfers may be slower than expected which may reduce application throughput.\n\n";
   }
 
-  // padding for the input and output buffers to deal with granularity of
+
+  /*const std::string secret {"Ifmmp-xpsme\")boe!tpnf!beejujpobm!ufyu!mfgu!up!fyqfsjfodf!cz!svoojoh!ju1*"};
+   const auto sz=secret.size();
+   char*result=sycl::malloc_shared<char>(sz,q);
+
+   std::memcpy(result,secret.data(),sz);
+
+   q.parallel_for(sz,[=](auto&i){
+       result[i]-=1;
+   }).wait();
+   std::cout<< result << "\n";*/
+
+
+
+
+
+    // padding for the input and output buffers to deal with granularity of
   // kernel reads and writes
 
   //缓冲区大小256
@@ -305,7 +322,7 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
           return 1;
         }
         // zero pages to fully allocate them
-        //分配初始内存
+        //并行初始化内存
         memset(kinfo[eng][i].poutput_buffer, 0, outputSize);
       }
 
@@ -366,7 +383,10 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
                       , eng);
 
       // Transfer the output (compressed) data from device to host.
+
       //将输出(压缩)数据从设备传输到主机
+      // Immediate code to set up task graph node
+        std::cout << "current_crc=====> " << kinfo[eng][i].current_crc <<std::endl;
       e_output_dma[eng][i] = q.submit([&](handler &h) {
         auto out_data = kinfo[eng][i].pobuf->get_access<access::mode::read>(h);
         h.copy(out_data, kinfo[eng][i].poutput_buffer);
@@ -438,6 +458,7 @@ int CompressFile(queue &q, std::string &input_file, std::vector<std::string> out
   // Write the output compressed data from the first iteration of each engine, to a file.
   for (int eng = 0; eng < kNumEngines; eng++) {
     // WriteBlockGzip() returns 1 on failure
+    std::cout << "crc======>:"<<kinfo[eng][0].buffer_crc[0]<<"\n";
     if (report && WriteBlockGzip(input_file, outfilenames[eng], kinfo[eng][0].poutput_buffer,
                         kinfo[eng][0].out_info[0].compression_sz,
                         kinfo[eng][0].file_size, kinfo[eng][0].buffer_crc[0])) {

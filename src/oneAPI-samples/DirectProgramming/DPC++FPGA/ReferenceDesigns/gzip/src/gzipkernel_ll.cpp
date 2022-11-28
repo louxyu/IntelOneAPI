@@ -2554,6 +2554,7 @@ std::vector<event> SubmitGzipTasksHelper(queue &q, size_t block_size,
   // for each value of the pack (Indices).
   // This means the call quite literally expands to:
   //    SubmitLZReduction<BatchSize>(<other args>, in_ptrs[0], in_ptrs[1], ...);
+  //lz77处理
   event e_LZReduction = SubmitLZReduction<engineID,BatchSize>(q,
                                                      block_size,
                                                      last_block,
@@ -2561,12 +2562,14 @@ std::vector<event> SubmitGzipTasksHelper(queue &q, size_t block_size,
                                                      in_ptrs[Indices]...
                                                      );
 
+  //crc处理
   event e_CRC = SubmitCRC<engineID,BatchSize>(q,
                                     block_size,
                                     result_crc,
                                     depend_on);
 
-  
+
+  //霍夫曼处理
   event e_StaticHuffman = SubmitStaticHuffman<engineID,BatchSize>(q,
                                                          block_size,
                                                          gzip_out_buf,

@@ -1,3 +1,11 @@
+/**
+ * 低延时版本
+ * 低延迟变量利用通用共享内存（USM）的优势来避免这些复制操作，
+ * 允许GZIP引擎直接访问主机内存中的输入/输出缓冲区。
+ * 这减少了延迟，但吞吐量也会减少。
+ * 这里的 "延迟 "是指从输入缓冲区在主机内存中可用到输出缓冲区（即压缩结果）在主机内存中可用的时间长度。
+ * 低延迟变体仅在Stratix® 10 SX上支持。
+ */
 #include <CL/sycl.hpp>
 #include <sycl/ext/intel/fpga_extensions.hpp>
 #include <chrono>
@@ -222,8 +230,7 @@ int CompressFile(queue &q, std::string &input_file,
   usm_allocator<char, usm::alloc::host> alloc_char(ctxt, dev);
 
   // Read the input file
-  std::string device_string =
-      q.get_device().get_info<info::device::name>().c_str();
+  std::string device_string = q.get_device().get_info<info::device::name>().c_str();
 
   // If
   // the device is S10, we pre-pin some buffers to
@@ -245,13 +252,11 @@ int CompressFile(queue &q, std::string &input_file,
   // kernel reads and writes
   constexpr size_t kInOutPadding = 16 * kVec;  
   
-  std::ifstream file(input_file,
-                     std::ios::in | std::ios::binary | std::ios::ate);
+  std::ifstream file(input_file,std::ios::in | std::ios::binary | std::ios::ate);
   if (file.is_open()) {
     isz = file.tellg();
     if (prepin) {
-      pinbuf = (char *)malloc_host(
-          isz + kInOutPadding, q.get_context());  // Pre-pin the buffer, for faster DMA
+      pinbuf = (char *)malloc_host(isz + kInOutPadding, q.get_context());  // Pre-pin the buffer, for faster DMA
     } else {                      // throughput, using malloc_host().
       pinbuf = new char[isz + kInOutPadding];
     }
@@ -288,9 +293,7 @@ int CompressFile(queue &q, std::string &input_file,
       kinfo[eng][i].input_size = isz;
       // Allocating slightly larger buffers (+ 16 * kVec) to account for
       // granularity of kernel writes
-      kinfo[eng][i].output_size =
-          ((isz + kInOutPadding) < kMinBufferSize) ? kMinBufferSize
-                                                   : (isz + kInOutPadding);
+      kinfo[eng][i].output_size = ((isz + kInOutPadding) < kMinBufferSize) ? kMinBufferSize: (isz + kInOutPadding);
       const size_t input_alloc_size = isz + kInOutPadding;
 
       kinfo[eng][i].last_block = true;
@@ -298,14 +301,8 @@ int CompressFile(queue &q, std::string &input_file,
 
       // Only allocate N_BUFFERING number of buffers and reuse them on
       // subsequent iterations.
-      kinfo[eng][i].gzip_out_buf =
-          i >= N_BUFFERING ? kinfo[eng][i - N_BUFFERING].gzip_out_buf
-                           : alloc_GzipOutInfo.allocate(BATCH_SIZE *
-                                                        sizeof(GzipOutInfo));
-      kinfo[eng][i].current_crc =
-          i >= N_BUFFERING
-              ? kinfo[eng][i - N_BUFFERING].current_crc
-              : alloc_unsigned.allocate(BATCH_SIZE * sizeof(uint32_t));
+      kinfo[eng][i].gzip_out_buf =i >= N_BUFFERING ? kinfo[eng][i - N_BUFFERING].gzip_out_buf: alloc_GzipOutInfo.allocate(BATCH_SIZE *sizeof(GzipOutInfo));
+      kinfo[eng][i].current_crc =i >= N_BUFFERING? kinfo[eng][i - N_BUFFERING].current_crc : alloc_unsigned.allocate(BATCH_SIZE * sizeof(uint32_t));
 
       for (int b = 0; b < BATCH_SIZE; b++) {
         kinfo[eng][i].current_crc[b] = 0;
@@ -382,8 +379,7 @@ int CompressFile(queue &q, std::string &input_file,
   for (int index = 0; index < initial_index; index++) {
     for (size_t eng = 0; eng < kNumEngines; eng++) {
       for (int b = 0; b < BATCH_SIZE; b++) {
-        memcpy(kinfo[eng][index].pibuf_ptr_array[b],
-               kinfo[eng][index].pref_buffer, kinfo[eng][index].input_size);
+        memcpy(kinfo[eng][index].pibuf_ptr_array[b],kinfo[eng][index].pref_buffer, kinfo[eng][index].input_size);
       }
     }
   }
@@ -410,6 +406,7 @@ int CompressFile(queue &q, std::string &input_file,
 
   // Main loop where the gzip engine is repeatedly invoked in a double-buffered
   // fashion.
+  //双缓冲
   for (int index = initial_index; index < buffers_count; index++) {
     for (size_t eng = 0; eng < kNumEngines; eng++) {
       /************************************/
@@ -433,8 +430,7 @@ int CompressFile(queue &q, std::string &input_file,
   }
 
   // Wait for all kernels to complete.
-  for (int index = buffers_count - initial_index; index < buffers_count;
-       index++) {
+  for (int index = buffers_count - initial_index; index < buffers_count;index++) {
     for (size_t eng = 0; eng < kNumEngines; eng++) {
       for (auto event : kinfo[eng][index].kernel_event) {
         event.wait();
@@ -485,8 +481,7 @@ int CompressFile(queue &q, std::string &input_file,
                 input_file, outfilenames[eng], kinfo[eng][i].pobuf_ptr_array[b],
                 kinfo[eng][i].gzip_out_buf[b].compression_sz,
                 kinfo[eng][i].input_size,
-                Crc32(kinfo[eng][i].pref_buffer, kinfo[eng][i].input_size,
-                      kinfo[eng][i].current_crc[b])  // Compute the remaining
+                Crc32(kinfo[eng][i].pref_buffer, kinfo[eng][i].input_size,kinfo[eng][i].current_crc[b])  // Compute the remaining
                                                      // piece of the CRC.
                 )) {
           std::cout << "FAILED\n";

@@ -729,9 +729,11 @@ void SubmitGzipTasksSingleEngine(
     buffer<struct GzipOutInfo, 1> *gzip_out_buf,
     buffer<unsigned, 1> *result_crc, bool last_block, event &e_crc, event &e_lz,
     event &e_huff) {
+    //Create alias for pipe type so that cons istent across uses
   using acc_dist_channel = ext::intel::pipe<class some_pipe, struct DistLen>;
   using acc_dist_channel_last = ext::intel::pipe<class some_pipe2, struct DistLen>;
 
+  int*temp_result=sycl::malloc_shared<int>(block_size/64/2,q);
   //CRC校验
   e_crc = q.submit([&](handler &h) {
     auto accessor_isz = block_size;//要压缩文件大小
@@ -1962,9 +1964,9 @@ void SubmitGzipTasksSingleEngine(
       const int num_sections = accessor_isz / (num_nibbles_parallel /2);  // how many loop iterations 循环次数
       unsigned int result = ~0;
 
-      for (int i = 0; i < num_sections; i++) {
         unsigned int result_update_odd = 0;
         unsigned int result_update_even = 0;
+      for (int i = 0; i < num_sections; i++) {
 // which 4 bit chunk within the section -- this loop can be unrolled, the
 // total update for the crc is the xor of the updates from the nibbles
         #pragma unroll
@@ -1978,23 +1980,28 @@ void SubmitGzipTasksSingleEngine(
             result_update_even ^= table64[nib][this_table_index & 0xf];
           }
         }
-        result = result_update_odd ^ result_update_even;
       }
+        result = result_update_odd ^ result_update_even;
 
       accresult_crc[0] = ~result;
+      temp_result[0]=~result;
     });
   });
-
- //1.LZ77算法
-  e_lz = q.submit([&](handler &h) {
+    //1.LZ77算法
+    e_lz = q.submit([&](handler &h) {
     auto accessor_isz = block_size;//压缩文件大小
     auto acc_pibuf = pibuf->get_access<access::mode::read>(h);//压缩文件
 
-    h.single_task<LZReduction<engineID>>([=]() [[intel::kernel_args_restrict]] {
+
+      h.single_task<LZReduction<engineID>>([=]() [[intel::kernel_args_restrict]] {
       //-------------------------------------
       //   Hash Table(s)
       //-------------------------------------
 
+      //singlepump:指定实现变量或数组的内存的时钟频率应与访问变量或数组的频率相同
+      //doublepump:指定实现变量或数组的内存的时钟频率应为访问它的速率的两倍。
+      //numbanks:指定实现变量或数组的内存必须有 kVec 个内存库。
+      //max_replicates:指定最多应创建kVec个复制，以实现从数据通路同时读取
       [[intel::singlepump]] [[intel::numbanks(kVec)]] [[intel::max_replicates(kVec)]] struct {
         unsigned char s[kLen];
       } dictionary[kDepth][kVec];
@@ -2053,7 +2060,7 @@ void SubmitGzipTasksSingleEngine(
         current_window[i + kVec] = in.data[i];
       });
 
-      //开始编码
+      //开始编码 计算完成后写入内核 进行下一步 流水线并行计算
       do {
         //-----------------------------
         // Prepare current window
@@ -2091,6 +2098,7 @@ void SubmitGzipTasksSingleEngine(
         // loop over kVec compare windows, each has a different hash
         //16*16*16(4096)
         //移动比较窗口
+
         Unroller<0, kVec>::step([&](int i) {
           // loop over all kVec bytes
           Unroller<0, kLen>::step([&](int j) {
@@ -2118,6 +2126,9 @@ void SubmitGzipTasksSingleEngine(
         Unroller<0, kLen>::step([&](int i) {
           Unroller<0, kVec>::step([&](int j) {
             // store actual bytes
+            // Byte Metadata Reader
+            // GZIP Stacker
+            //Consumer
             dictionary[hash[i]][i].s[j] = current_window[i + j];
           });
         });
@@ -2270,11 +2281,13 @@ void SubmitGzipTasksSingleEngine(
         dist_offs_data.len[i] = pred ? 0 : -1;
       });
 
-      acc_dist_channel_last::write(dist_offs_data);
+            //结束块标记
+          acc_dist_channel_last::write(dist_offs_data);
+      });
     });
-  });
   //霍夫曼算法
   e_huff = q.submit([&](handler &h) {
+      //要压缩文件大小
     auto accessor_isz = block_size;
     auto acc_gzip_out =gzip_out_buf->get_access<access::mode::discard_write>(h);
     auto accessor_output = pobuf->get_access<access::mode::discard_write>(h);
@@ -2291,7 +2304,7 @@ void SubmitGzipTasksSingleEngine(
       int odx = 0;
 
       // Add the gzip start block marker. Assumes static huffman trees.
-      //静态树？
+      //静态树
       leftover_size = 3;
       leftover[0] = ((kStaticTrees << 1) + (acc_eof));
 

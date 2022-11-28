@@ -69,8 +69,7 @@ int WriteBlockGzip(
 
   int max_filename_sz = 256;
 
-  unsigned char *pgziphdr =
-      (unsigned char *)malloc(sizeof(gzip_header) + max_filename_sz);
+  unsigned char *pgziphdr =(unsigned char *)malloc(sizeof(gzip_header) + max_filename_sz);
 
   if (!pgziphdr) {
     std::cout << "pgzip header cannot be allocated\n";
